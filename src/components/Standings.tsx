@@ -1,10 +1,11 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { Fixture, Game } from "../types";
-import { buildStandings } from "../lib/scoring";
-import { scoreBonus } from "../lib/challenges";
+import { buildStandings, managersOfRound } from "../lib/scoring";
+import { scoreBonus, STAGE_LABEL } from "../lib/challenges";
 import { TEAMS_BY_CODE } from "../data/teams";
 import { TeamBadge } from "./TeamBadge";
+import { AnimatedNumber } from "./AnimatedNumber";
 import { shareNode } from "../lib/share";
 
 export function Standings({
@@ -17,7 +18,7 @@ export function Standings({
   /** Omit to render captains read-only (league players can't set captains). */
   onCaptain?: (entrantId: string, code: string | null) => void;
 }) {
-  const bonusByEntrant = scoreBonus(game.challenges ?? [], game.predictions ?? []);
+  const bonusByEntrant = scoreBonus(game.challenges ?? [], game.predictions ?? [], fixtures);
   const rows = buildStandings(
     game.entrants,
     game.allocations,
@@ -31,6 +32,47 @@ export function Standings({
   const leader = rows[0];
   const spoon = rows[rows.length - 1];
   const hasResults = rows.some((r) => r.played > 0);
+  const managers = managersOfRound(
+    game.entrants,
+    game.allocations,
+    fixtures,
+    game.scoring,
+    game.captains ?? {},
+    game.challenges ?? [],
+    game.predictions ?? []
+  );
+
+  // Position-change arrows: compare to the order we saw last time (per league).
+  const rankKey = `wcs:ranks:${game.id}`;
+  const baseline = useRef<Record<string, number> | null>(null);
+  if (baseline.current === null) {
+    try {
+      const raw = localStorage.getItem(rankKey);
+      baseline.current = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    } catch {
+      baseline.current = {};
+    }
+  }
+  const orderKey = rows.map((r) => r.entrant.id).join(",");
+  useEffect(() => {
+    if (!hasResults) return;
+    const current: Record<string, number> = {};
+    rows.forEach((r, i) => (current[r.entrant.id] = i));
+    try {
+      localStorage.setItem(rankKey, JSON.stringify(current));
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderKey, hasResults]);
+
+  function moveArrow(entrantId: string, idx: number) {
+    const prev = baseline.current?.[entrantId];
+    if (prev === undefined || !hasResults) return null;
+    if (prev > idx) return <span className="text-emerald-400" title="up">▲</span>;
+    if (prev < idx) return <span className="text-red-400" title="down">▼</span>;
+    return null;
+  }
   const pot = game.prize ? game.prize.entryFee * game.entrants.length : 0;
 
   return (
@@ -87,7 +129,12 @@ export function Standings({
                       i === 0 ? "bg-gold/10" : ""
                     }`}
                   >
-                    <td className="px-3 py-2 font-bold text-white/60">{i + 1}</td>
+                    <td className="px-3 py-2 font-bold text-white/60">
+                      <span className="inline-flex items-center gap-1">
+                        {i + 1}
+                        {moveArrow(r.entrant.id, i)}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 font-bold">
                       {i === 0 ? "👑 " : isLast ? "🥄 " : ""}
                       {r.entrant.name}
@@ -114,7 +161,7 @@ export function Standings({
                     <td className="px-2 py-2 text-center text-white/70">{r.drawn}</td>
                     <td className="px-2 py-2 text-center text-white/70">{r.goalsFor}</td>
                     <td className="px-3 py-2 text-right text-lg font-black text-gold">
-                      {r.points}
+                      <AnimatedNumber value={r.points} />
                     </td>
                   </motion.tr>
                   {isOpen && (
@@ -179,9 +226,31 @@ export function Standings({
         )}
       </div>
 
+      {managers.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-pitch">
+          <h3 className="bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-gold/80">
+            🏅 Manager of the Round
+          </h3>
+          <div>
+            {managers.map((m) => (
+              <div
+                key={m.stage}
+                className="flex items-center justify-between gap-2 border-t border-white/5 px-4 py-2 text-sm first:border-t-0"
+              >
+                <span className="text-xs uppercase tracking-wider text-white/50">
+                  {STAGE_LABEL[m.stage]}
+                </span>
+                <span className="flex-1 text-right font-bold">{m.entrant.name}</span>
+                <span className="w-16 text-right font-black text-gold">{m.points} pts</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!hasResults && (
         <p className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center text-xs text-white/40">
-          No results yet — sync results or add them manually to get the table moving.
+          No results yet — load the 2026 schedule or add results to get the table moving.
         </p>
       )}
     </div>

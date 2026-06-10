@@ -1,11 +1,14 @@
 import type {
   Allocation,
+  BonusChallenge,
   Entrant,
   Fixture,
+  Prediction,
   ScoringConfig,
   Stage,
   StandingRow,
 } from "../types";
+import { scoreBonus, STAGE_ORDER } from "./challenges.ts";
 
 export const DEFAULT_SCORING: ScoringConfig = {
   win: 3,
@@ -185,4 +188,53 @@ export function buildStandings(
       a.entrant.name.localeCompare(b.entrant.name)
   );
   return rows;
+}
+
+export interface RoundManager {
+  stage: Stage;
+  entrant: Entrant;
+  points: number;
+}
+
+/**
+ * "Manager of the Round" — for every round (stage) that has finished fixtures,
+ * the entrant who gained the most points *from that round alone* (its match
+ * points + any bonus challenges scoped to it). Fully derived from results.
+ */
+export function managersOfRound(
+  entrants: Entrant[],
+  allocations: Allocation[],
+  fixtures: Fixture[],
+  scoring: ScoringConfig,
+  captains: Record<string, string> = {},
+  challenges: BonusChallenge[] = [],
+  predictions: Prediction[] = []
+): RoundManager[] {
+  const out: RoundManager[] = [];
+  for (const stage of STAGE_ORDER) {
+    const stageFixtures = fixtures.filter(
+      (f) =>
+        f.stage === stage &&
+        f.status === "finished" &&
+        f.homeScore !== null &&
+        f.awayScore !== null
+    );
+    if (stageFixtures.length === 0) continue;
+    const stageBonus = scoreBonus(
+      challenges.filter((c) => c.scope === stage),
+      predictions,
+      fixtures
+    );
+    const rows = buildStandings(
+      entrants,
+      allocations,
+      stageFixtures,
+      scoring,
+      captains,
+      stageBonus
+    );
+    const top = rows[0];
+    if (top && top.points > 0) out.push({ stage, entrant: top.entrant, points: top.points });
+  }
+  return out;
 }

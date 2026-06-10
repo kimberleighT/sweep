@@ -30,10 +30,11 @@ export function Draw({
   onComplete: (allocations: Allocation[]) => void;
   onBack: () => void;
 }) {
-  const { picks, allocations } = useMemo(
-    () => drawSeededPots(game.entrants, teams),
-    [game.entrants, teams]
-  );
+  // Compute the draw exactly ONCE, on mount. In league mode the parent re-fetches
+  // and passes a fresh `game` object every 15s; a useMemo keyed on game.entrants
+  // would re-run drawSeededPots (a new random shuffle) on each poll and make the
+  // board reshuffle/flicker. The draw is a snapshot of who was in when it started.
+  const [{ picks, allocations }] = useState(() => drawSeededPots(game.entrants, teams));
 
   const [index, setIndex] = useState(0); // picks committed to columns
   const [revealing, setRevealing] = useState<Pick | null>(null);
@@ -186,6 +187,21 @@ export function Draw({
         </div>
       </header>
 
+      {/* Stable "draw complete" banner */}
+      {done && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-gold/15 px-4 py-3">
+          <span className={`font-black text-gold ${present ? "text-3xl" : "text-lg"}`}>
+            🏆 Draw complete — good luck!
+          </span>
+          <button
+            onClick={() => onComplete(allocations)}
+            className="rounded-xl bg-gold px-5 py-2 font-black uppercase tracking-wide text-black transition hover:brightness-110"
+          >
+            Enter the league →
+          </button>
+        </div>
+      )}
+
       {/* Reveal stage */}
       <div className={`relative my-4 flex items-center justify-center ${present ? "h-72" : "h-44"}`}>
         <AnimatePresence mode="wait">
@@ -237,7 +253,7 @@ export function Draw({
               animate={{ scale: 1, opacity: 1 }}
               className={`font-black text-gold ${present ? "text-5xl" : "text-2xl"}`}
             >
-              🏆 All teams allocated — good luck!
+              🏆 All teams allocated!
             </motion.p>
           )}
         </AnimatePresence>

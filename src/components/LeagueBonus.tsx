@@ -1,44 +1,43 @@
 import { useMemo, useState } from "react";
-import type { BonusChallenge, ChallengeKind, Game, Team } from "../types";
+import type { BonusChallenge, ChallengeKind, Fixture, Game, Stage, Team } from "../types";
 import {
   challengeStatus,
   isCorrect,
   isLocked,
-  jokersUsed,
+  jokerScopesUsed,
   kindMeta,
+  resolveBonusAnswer,
+  STAGE_LABEL,
 } from "../lib/challenges";
 import { AnswerInput, NewChallenge, STATUS_STYLE, showAnswer } from "./Bonus";
 
 /**
- * League-mode Bonus tab.
- *
- * Differs from the quick-play Bonus (which lets the host enter everyone's picks
- * on one device): here the host only creates challenges and sets answers, while
- * each player enters their own prediction. Others' picks stay hidden until the
- * challenge locks — that gate is enforced server-side; this just renders what
- * get_league_state returned.
+ * League-mode Bonus tab. The host creates challenges; each player enters their
+ * own prediction. Answers are computed automatically from the match results
+ * (no human judging), so there's nothing for the host to resolve.
  */
 export function LeagueBonus({
   game,
   teams,
+  fixtures,
   isHost,
   viewerEntrantId,
   onCreateChallenge,
-  onResolveChallenge,
   onDeleteChallenge,
   onSubmitPrediction,
 }: {
   game: Game;
   teams: Team[];
+  fixtures: Fixture[];
   isHost: boolean;
   viewerEntrantId: string | null;
   onCreateChallenge: (c: {
     kind: ChallengeKind;
+    scope: Stage;
     prompt: string;
     points: number;
     locksAt: string;
   }) => void;
-  onResolveChallenge: (challengeId: string, answer: string | null) => void;
   onDeleteChallenge: (challengeId: string) => void;
   onSubmitPrediction: (challengeId: string, answer: string, isJoker: boolean) => void;
 }) {
@@ -46,9 +45,10 @@ export function LeagueBonus({
   const challenges = game.challenges ?? [];
   const predictions = game.predictions ?? [];
 
-  // The viewer's own Joker usage — own predictions are always returned, so this
-  // is accurate for the player even while others' picks are hidden.
-  const jokerUsedBy = useMemo(() => jokersUsed(predictions), [predictions]);
+  const jokerScopes = useMemo(
+    () => jokerScopesUsed(predictions, challenges),
+    [predictions, challenges]
+  );
 
   const ordered = useMemo(
     () => [...challenges].sort((a, b) => Date.parse(a.locksAt) - Date.parse(b.locksAt)),
@@ -73,9 +73,10 @@ export function LeagueBonus({
 
       {isHost && adding && (
         <NewChallenge
-          onCreate={(c) => {
+          onCreate={(c: BonusChallenge) => {
             onCreateChallenge({
               kind: c.kind,
+              scope: c.scope,
               prompt: c.prompt,
               points: c.points,
               locksAt: c.locksAt,
@@ -90,7 +91,7 @@ export function LeagueBonus({
         <p className="rounded-xl border border-white/10 bg-black/20 px-3 py-6 text-center text-sm text-white/40">
           No bonus challenges yet.
           {isHost
-            ? " Add prediction rounds — total goals, top team, biggest margin, MOTM — to keep everyone engaged."
+            ? " Add prediction rounds — they score themselves from the results."
             : " The host hasn't added any prediction rounds yet."}
         </p>
       )}
@@ -101,10 +102,10 @@ export function LeagueBonus({
           challenge={c}
           game={game}
           teams={teams}
+          fixtures={fixtures}
           isHost={isHost}
           viewerEntrantId={viewerEntrantId}
-          jokerUsedBy={jokerUsedBy}
-          onResolve={(answer) => onResolveChallenge(c.id, answer)}
+          jokerScopes={jokerScopes}
           onDelete={() => onDeleteChallenge(c.id)}
           onSubmit={(answer, isJoker) => onSubmitPrediction(c.id, answer, isJoker)}
         />
@@ -117,46 +118,47 @@ function LeagueChallengeCard({
   challenge,
   game,
   teams,
+  fixtures,
   isHost,
   viewerEntrantId,
-  jokerUsedBy,
-  onResolve,
+  jokerScopes,
   onDelete,
   onSubmit,
 }: {
   challenge: BonusChallenge;
   game: Game;
   teams: Team[];
+  fixtures: Fixture[];
   isHost: boolean;
   viewerEntrantId: string | null;
-  jokerUsedBy: Set<string>;
-  onResolve: (answer: string | null) => void;
+  jokerScopes: Map<string, Set<Stage>>;
   onDelete: () => void;
   onSubmit: (answer: string, isJoker: boolean) => void;
 }) {
   const meta = kindMeta(challenge.kind);
-  const status = challengeStatus(challenge);
+  const status = challengeStatus(challenge, fixtures);
   const locked = isLocked(challenge);
+  const answer = resolveBonusAnswer(challenge, fixtures);
   const preds = game.predictions ?? [];
 
   const own = viewerEntrantId
     ? preds.find((p) => p.challengeId === challenge.id && p.entrantId === viewerEntrantId)
     : undefined;
 
-  const [answerDraft, setAnswerDraft] = useState(challenge.answer ?? "");
   const [pickDraft, setPickDraft] = useState(own?.answer ?? "");
   const [jokerDraft, setJokerDraft] = useState(!!own?.joker);
 
   const jokerLockedElsewhere =
-    !!viewerEntrantId && jokerUsedBy.has(viewerEntrantId) && !own?.joker;
+    !!viewerEntrantId &&
+    !!jokerScopes.get(viewerEntrantId)?.has(challenge.scope) &&
+    !own?.joker;
+  const dirty = pickDraft !== (own?.answer ?? "") || jokerDraft !== !!own?.joker;
 
   const lockLabel = new Date(challenge.locksAt).toLocaleString(undefined, {
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
   });
-
-  const dirty = pickDraft !== (own?.answer ?? "") || jokerDraft !== !!own?.joker;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-pitch">
@@ -166,7 +168,7 @@ function LeagueChallengeCard({
           <span>
             <span className="block font-bold">{challenge.prompt}</span>
             <span className="block text-xs uppercase tracking-wider text-white/40">
-              {challenge.points} pts · locks {lockLabel}
+              {challenge.points} pts · {STAGE_LABEL[challenge.scope]} · locks {lockLabel}
             </span>
           </span>
         </span>
@@ -178,37 +180,17 @@ function LeagueChallengeCard({
       </div>
 
       <div className="space-y-3 border-t border-white/10 px-4 py-3">
-        {/* Host: set/clear the correct answer */}
-        {isHost && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 p-2">
-            <span className="text-xs uppercase tracking-wider text-white/40">
-              Correct answer
+        {/* auto-resolved answer */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 p-2 text-sm">
+          <span className="text-xs uppercase tracking-wider text-white/40">Answer</span>
+          {answer !== null ? (
+            <span className="font-bold text-gold">{showAnswer(challenge.kind, answer)}</span>
+          ) : (
+            <span className="text-white/40">
+              🤖 auto-scores once the {STAGE_LABEL[challenge.scope]} finishes
             </span>
-            <AnswerInput
-              kind={challenge.kind}
-              teams={teams}
-              value={answerDraft}
-              onChange={setAnswerDraft}
-            />
-            <button
-              onClick={() => onResolve(answerDraft || null)}
-              className="rounded-md bg-gold px-3 py-1 text-xs font-black uppercase tracking-wide text-black hover:brightness-110"
-            >
-              {status === "resolved" ? "Update" : "Award"}
-            </button>
-            {status === "resolved" && (
-              <button
-                onClick={() => {
-                  setAnswerDraft("");
-                  onResolve(null);
-                }}
-                className="rounded-md border border-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white/10"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Player: enter your own pick (before lock) */}
         {viewerEntrantId && !locked && (
@@ -229,7 +211,7 @@ function LeagueChallengeCard({
                 onClick={() => setJokerDraft((v) => !v)}
                 title={
                   jokerLockedElsewhere
-                    ? "Joker already used on another challenge"
+                    ? "Joker already used this round"
                     : "Play your Joker (doubles points if correct)"
                 }
                 className={`rounded-md px-2 py-1 text-xs font-bold ring-1 transition disabled:opacity-30 ${
@@ -250,7 +232,7 @@ function LeagueChallengeCard({
               </button>
             </div>
             <p className="text-xs text-white/40">
-              One 🃏 Joker per player, doubles that round if you're right.
+              One 🃏 Joker per round, doubles that pick if you're right.
             </p>
           </div>
         )}
@@ -274,9 +256,7 @@ function LeagueChallengeCard({
                 (x) => x.challengeId === challenge.id && x.entrantId === e.id
               );
               if (!p) return null; // hidden until lock (or not predicted)
-              const correct =
-                status === "resolved" &&
-                isCorrect(challenge.kind, challenge.answer as string, p.answer);
+              const correct = answer !== null && isCorrect(challenge.kind, answer, p.answer);
               return (
                 <tr key={e.id} className="border-t border-white/5">
                   <td className="py-1.5 pr-2 font-semibold">{e.name}</td>

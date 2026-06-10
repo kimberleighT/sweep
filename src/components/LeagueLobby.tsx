@@ -29,6 +29,7 @@ export function LeagueLobby({
   const [displayName, setDisplayName] = useState("");
   const [pin, setPin] = useState("");
   const [leagueName, setLeagueName] = useState("Office World Cup 2026");
+  const [hostName, setHostName] = useState("");
   const [hostPin, setHostPin] = useState("");
   const [entryFee, setEntryFee] = useState(5);
   const [currency, setCurrency] = useState("£");
@@ -137,13 +138,22 @@ export function LeagueLobby({
               />
             </label>
             <label className="block">
+              <span className={labelCls}>Your name (you're playing too)</span>
+              <input
+                value={hostName}
+                onChange={(e) => setHostName(e.target.value)}
+                placeholder="e.g. Rich"
+                className={inputCls}
+              />
+            </label>
+            <label className="block">
               <span className={labelCls}>Host PIN</span>
               <input
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
                 type="password"
                 inputMode="numeric"
-                placeholder="you'll need this to manage the league"
+                placeholder="manages the league + signs you in"
                 className={inputCls}
               />
             </label>
@@ -166,11 +176,12 @@ export function LeagueLobby({
               </div>
             </div>
             <button
-              disabled={busy || !hostPin}
+              disabled={busy || !hostPin || !hostName}
               onClick={() =>
                 run(() =>
                   createLeague({
                     name: leagueName,
+                    hostName,
                     hostPin,
                     scoring: DEFAULT_SCORING,
                     entryFee,

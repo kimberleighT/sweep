@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Allocation, Fixture } from "../types";
-import { TEAMS } from "../data/teams";
-import { TEAMS_BY_CODE } from "../data/teams";
+import { useCallback, useEffect, useRef, useState } from "react";
+import confetti from "canvas-confetti";
+import type { Allocation } from "../types";
+import { TEAMS, TEAMS_BY_CODE } from "../data/teams";
+import { buildScheduleFixtures } from "../data/worldcup2026";
 import { loadTeams } from "../lib/storage";
+import { buildStandings } from "../lib/scoring";
+import { scoreBonus } from "../lib/challenges";
 import { fetchSeasonFixtures, mergeFixtures } from "../lib/api";
 import {
   createChallenge,
   deleteChallenge,
+  getActivity,
   getLeagueState,
   setAllocations,
   setCaptain,
-  setChallengeAnswer,
   setMatches,
   submitPrediction,
+  subscribeLeague,
+  type ActivityItem,
   type LeagueState,
 } from "../lib/db";
 import type { LeagueSession } from "../lib/session";
@@ -22,6 +27,7 @@ import { Fixtures } from "./Fixtures";
 import { LeagueBonus } from "./LeagueBonus";
 import { PowerRanking } from "./PowerRanking";
 import { DailyDigest } from "./DailyDigest";
+import { NextUp } from "./Countdown";
 
 type Tab = "table" | "fixtures" | "bonus" | "power";
 const TAB_LABEL: Record<Tab, string> = {
@@ -44,6 +50,11 @@ export function LeagueRoom({
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("table");
+  const [drawing, setDrawing] = useState(false);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  // Pause polling while the host is drawing so a refetch can't churn the draw.
+  const drawingRef = useRef(false);
+  drawingRef.current = drawing;
 
   const refresh = useCallback(async () => {
     try {
@@ -57,9 +68,67 @@ export function LeagueRoom({
   // initial load + light polling so players see each other update
   useEffect(() => {
     void refresh();
-    const id = setInterval(() => void refresh(), 15000);
+    // Realtime is primary; poll is a slow fallback.
+    const id = setInterval(() => {
+      if (!drawingRef.current) void refresh();
+    }, 60000);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Activity feed: load history, then live-update via Realtime Broadcast.
+  useEffect(() => {
+    let active = true;
+    getActivity(session.joinCode)
+      .then((a) => {
+        if (active) setActivity(a);
+      })
+      .catch(() => {});
+    const unsub = subscribeLeague(session.joinCode, (p) => {
+      setActivity((prev) =>
+        [
+          { id: prev.length ? prev[0]!.id + 1 : 1, kind: p.kind, text: p.text, created_at: new Date().toISOString() },
+          ...prev,
+        ].slice(0, 30)
+      );
+      void refresh();
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [session.joinCode, refresh]);
+
+  // Celebrate when the viewer takes top spot (computed from the live standings).
+  const celebratedLeader = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!state) return;
+    const g = state.game;
+    const bonus = scoreBonus(g.challenges ?? [], g.predictions ?? [], state.fixtures);
+    const rows = buildStandings(
+      g.entrants,
+      g.allocations,
+      state.fixtures,
+      g.scoring,
+      g.captains ?? {},
+      bonus
+    );
+    const leaderId = rows[0]?.entrant.id ?? null;
+    if (
+      celebratedLeader.current !== undefined &&
+      leaderId &&
+      leaderId === state.viewer.entrantId &&
+      celebratedLeader.current !== leaderId
+    ) {
+      confetti({
+        particleCount: 140,
+        spread: 90,
+        origin: { y: 0.3 },
+        colors: ["#ffd24a", "#ffffff", "#0f5132"],
+      });
+      setMsg("🏆 You're top of the table!");
+    }
+    celebratedLeader.current = leaderId;
+  }, [state]);
 
   /** Run a mutation, surface errors, then refetch authoritative state. */
   async function act(fn: () => Promise<unknown>) {
@@ -101,13 +170,15 @@ export function LeagueRoom({
 
   // ----- pre-draw -----
   if (!game.drawn) {
-    if (isHost) {
+    // Host runs the animated draw — needs at least themselves (never 0 → no crash).
+    if (isHost && drawing && game.entrants.length >= 1) {
       return (
         <Draw
           game={game}
           teams={teams}
-          onComplete={(allocations: Allocation[]) =>
-            act(() =>
+          onComplete={(allocations: Allocation[]) => {
+            setDrawing(false); // resume polling once the draw is committed
+            void act(() =>
               setAllocations(
                 session.token,
                 allocations.map((a) => ({
@@ -116,19 +187,68 @@ export function LeagueRoom({
                   captain: null,
                 }))
               )
-            )
-          }
-          onBack={onLeave}
+            );
+          }}
+          onBack={() => setDrawing(false)}
         />
       );
     }
+
+    if (isHost) {
+      return (
+        <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
+          <div className="card space-y-4 p-6">
+            <p className="text-sm text-white/70">
+              Share code{" "}
+              <span className="font-mono text-lg tracking-[0.3em] text-gold">
+                {state.joinCode}
+              </span>{" "}
+              — players join on their own phones with a name + PIN. Run the draw once
+              everyone's in.
+            </p>
+
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-white/50">
+                Players in ({game.entrants.length})
+              </span>
+              {game.entrants.length === 0 ? (
+                <p className="mt-2 text-sm text-white/40">
+                  No players yet — waiting for the first to join…
+                </p>
+              ) : (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {game.entrants.map((e) => (
+                    <span
+                      key={e.id}
+                      className="rounded-lg bg-white/5 px-3 py-1 text-sm font-semibold ring-1 ring-white/10"
+                    >
+                      {e.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              disabled={game.entrants.length < 1}
+              onClick={() => setDrawing(true)}
+              className="w-full rounded-xl bg-gold py-3 font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-40"
+            >
+              Run the draw →
+            </button>
+            {game.entrants.length < 2 && (
+              <p className="text-xs text-white/40">
+                Just you so far — share the code to add players (the list refreshes
+                automatically), or run the draw solo to try it out.
+              </p>
+            )}
+          </div>
+        </LeagueShell>
+      );
+    }
+
     return (
-      <LeagueShell
-        state={state}
-        pot={pot}
-        onLeave={onLeave}
-        onRefresh={() => void refresh()}
-      >
+      <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
         <div className="card p-8 text-center">
           <p className="text-lg font-bold">Waiting for the draw…</p>
           <p className="mt-2 text-sm text-white/60">
@@ -142,7 +262,7 @@ export function LeagueRoom({
 
   // ----- in play -----
   return (
-    <LeagueShell state={state} pot={pot} onLeave={onLeave} onRefresh={() => void refresh()}>
+    <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
       {error && (
         <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
@@ -186,7 +306,19 @@ export function LeagueRoom({
       {tab === "fixtures" &&
         (isHost ? (
           <div className="space-y-3">
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    await setMatches(session.token, buildScheduleFixtures());
+                    setMsg("Loaded the full 2026 group-stage schedule.");
+                  })
+                }
+                className="rounded-lg bg-gold px-4 py-2 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-50"
+              >
+                {busy ? "Loading…" : "Load 2026 schedule"}
+              </button>
               <button
                 disabled={busy}
                 onClick={() =>
@@ -196,16 +328,16 @@ export function LeagueRoom({
                     await setMatches(session.token, mergeFixtures(fixtures, incoming));
                     setMsg(
                       matched === 0
-                        ? "API returned no matches — add results manually for now."
-                        : `Synced ${matched} fixtures${
+                        ? "API returned no matches — use the 2026 schedule or add manually."
+                        : `Synced ${matched} live results${
                             skipped ? `, skipped ${skipped} unknown` : ""
                           }.`
                     );
                   })
                 }
-                className="rounded-lg bg-gold px-4 py-2 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-50"
+                className="rounded-lg border border-white/20 px-4 py-2 text-sm font-bold uppercase tracking-wide transition hover:bg-white/10 disabled:opacity-50"
               >
-                {busy ? "Syncing…" : "Sync results"}
+                Sync live results
               </button>
             </div>
             <Fixtures
@@ -215,19 +347,17 @@ export function LeagueRoom({
             />
           </div>
         ) : (
-          <ReadOnlyFixtures fixtures={fixtures} />
+          <Fixtures fixtures={fixtures} teams={teams} onChange={() => {}} readOnly />
         ))}
 
       {tab === "bonus" && (
         <LeagueBonus
           game={game}
           teams={teams}
+          fixtures={fixtures}
           isHost={isHost}
           viewerEntrantId={viewer.entrantId}
           onCreateChallenge={(c) => void act(() => createChallenge(session.token, c))}
-          onResolveChallenge={(id, answer) =>
-            void act(() => setChallengeAnswer(session.token, id, answer))
-          }
           onDeleteChallenge={(id) => void act(() => deleteChallenge(session.token, id))}
           onSubmitPrediction={(id, answer, isJoker) =>
             void act(() => submitPrediction(session.token, id, answer, isJoker))
@@ -244,12 +374,14 @@ export function LeagueRoom({
 function LeagueShell({
   state,
   pot,
+  activity,
   onLeave,
   onRefresh,
   children,
 }: {
   state: LeagueState;
   pot: number;
+  activity: ActivityItem[];
   onLeave: () => void;
   onRefresh: () => void;
   children: React.ReactNode;
@@ -273,6 +405,9 @@ function LeagueShell({
               </span>
             )}
           </p>
+          <div className="mt-2">
+            <NextUp fixtures={state.fixtures} challenges={game.challenges ?? []} />
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -291,40 +426,25 @@ function LeagueShell({
           </button>
         </div>
       </header>
-      {children}
-    </div>
-  );
-}
 
-function ReadOnlyFixtures({ fixtures }: { fixtures: Fixture[] }) {
-  if (fixtures.length === 0) {
-    return (
-      <p className="card p-6 text-center text-white/50">
-        No fixtures yet — the host will sync or add results.
-      </p>
-    );
-  }
-  const played = fixtures.filter(
-    (f) => f.homeScore !== null && f.awayScore !== null
-  );
-  return (
-    <div className="overflow-hidden rounded-xl border border-white/10">
-      {(played.length ? played : fixtures).map((f) => {
-        const home = TEAMS_BY_CODE[f.homeCode];
-        const away = TEAMS_BY_CODE[f.awayCode];
-        return (
-          <div
-            key={f.id}
-            className="flex items-center justify-between gap-2 border-t border-white/5 px-3 py-2 text-sm first:border-t-0"
-          >
-            <span className="flex-1 text-right">{home?.name ?? f.homeCode}</span>
-            <span className="font-bold text-gold">
-              {f.homeScore ?? "–"} : {f.awayScore ?? "–"}
-            </span>
-            <span className="flex-1">{away?.name ?? f.awayCode}</span>
-          </div>
-        );
-      })}
+      {activity.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-white/10 bg-black/20 p-3">
+          <h3 className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-gold/70">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+            Live feed
+          </h3>
+          <ul className="space-y-1">
+            {activity.slice(0, 5).map((a) => (
+              <li key={a.id} className="flex items-center gap-2 text-sm text-white/70">
+                <span className="text-gold">•</span>
+                <span className="flex-1">{a.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {children}
     </div>
   );
 }

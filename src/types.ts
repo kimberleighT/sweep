@@ -57,27 +57,32 @@ export interface PrizeConfig {
 }
 
 /**
- * A bonus prediction round (highest-scoring team, total goals, MOTM…).
- * Maps 1:1 to the planned `bonus_challenges` Supabase table.
+ * A bonus prediction round. Every kind is auto-resolved from the match results
+ * (no human judging) over the fixtures in its `scope` round. See
+ * `resolveBonusAnswer` in lib/challenges.ts.
  */
 export type ChallengeKind =
-  | "top_team" // highest-scoring team of the round (pick a team)
-  | "total_goals" // total goals in a round (number)
-  | "biggest_margin" // biggest winning margin (number)
-  | "motm" // player of the match (free text)
-  | "favourite_result" // will the favourite win/draw/lose
-  | "custom"; // free-text question, host judges the answer
+  | "total_goals" // total goals scored in the round (number)
+  | "biggest_margin" // biggest winning margin in the round (number)
+  | "top_scoring_team" // team that scored the most goals in the round (pick a team)
+  | "highest_scoring_match" // most goals in a single match in the round (number)
+  | "total_draws" // how many matches were drawn in the round (number)
+  | "total_clean_sheets" // how many clean sheets were kept in the round (number)
+  | "one_goal_games" // matches decided by exactly one goal (number)
+  | "high_scoring_games"; // matches with 3+ total goals (number)
 
 export interface BonusChallenge {
   id: string;
   kind: ChallengeKind;
+  /** which round the challenge is computed over (its fixtures must all finish). */
+  scope: Stage;
   /** the question shown to players, e.g. "Total goals in the Round of 16?" */
   prompt: string;
   /** points a correct prediction earns (doubled if the player jokers it). */
   points: number;
   /** ISO timestamp; predictions are locked once now() passes this. */
   locksAt: string;
-  /** the correct answer, set by the host once known. null = unresolved. */
+  /** legacy column — answers are now computed from results, not stored. */
   answer: string | null;
   createdAt: string;
 }

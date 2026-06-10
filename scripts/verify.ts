@@ -1,8 +1,8 @@
 // Standalone sanity checks for the pure engines. Run:
 //   node --experimental-strip-types scripts/verify.ts
 import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
-import { buildStandings, DEFAULT_SCORING } from "../src/lib/scoring.ts";
-import { isCorrect, scoreBonus } from "../src/lib/challenges.ts";
+import { buildStandings, DEFAULT_SCORING, managersOfRound } from "../src/lib/scoring.ts";
+import { isCorrect, resolveBonusAnswer, scoreBonus } from "../src/lib/challenges.ts";
 import { TEAMS } from "../src/data/teams.ts";
 import type { BonusChallenge, Entrant, Fixture, Prediction } from "../src/types.ts";
 
@@ -87,32 +87,49 @@ const capRows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING,
 });
 check("captain doubles BRA owner to 150", capRows.find((r) => r.entrant.id === "e0")!.points === 150);
 
-// ---- bonus challenges ----
-check("isCorrect: number tolerant of text", isCorrect("total_goals", "12", "12") === true);
-check("isCorrect: number mismatch", isCorrect("total_goals", "12", "11") === false);
-check("isCorrect: result case-insensitive", isCorrect("favourite_result", "WIN", "win") === true);
-check("isCorrect: blank answer never correct", isCorrect("motm", "", "Messi") === false);
-check("isCorrect: text trims & collapses spaces", isCorrect("motm", " Lionel  Messi ", "lionel messi") === true);
+// ---- bonus challenges (auto-resolved from results) ----
+check("isCorrect: number match", isCorrect("total_goals", "8", "8") === true);
+check("isCorrect: number mismatch", isCorrect("total_goals", "8", "7") === false);
+check("isCorrect: team match", isCorrect("top_scoring_team", "BRA", "BRA") === true);
+check("isCorrect: team mismatch", isCorrect("top_scoring_team", "BRA", "ARG") === false);
+check("isCorrect: blank never correct", isCorrect("total_goals", "", "8") === false);
+
+// Auto-resolution over the group fixtures above: BRA 3-1 GER, ARG 2-2 ESP.
+const mk = (id: string, kind: BonusChallenge["kind"], scope: BonusChallenge["scope"]): BonusChallenge =>
+  ({ id, kind, scope, prompt: "", points: 5, locksAt: "2026-06-01T00:00:00Z", answer: null, createdAt: "" });
+check("resolve: group total goals = 8", resolveBonusAnswer(mk("g", "total_goals", "group"), fixtures) === "8");
+check("resolve: group top team = BRA", resolveBonusAnswer(mk("t", "top_scoring_team", "group"), fixtures) === "BRA");
+check("resolve: group draws = 1", resolveBonusAnswer(mk("d", "total_draws", "group"), fixtures) === "1");
+check("resolve: group biggest margin = 2", resolveBonusAnswer(mk("m", "biggest_margin", "group"), fixtures) === "2");
+check("resolve: r16 unresolved (no fixtures) → null", resolveBonusAnswer(mk("u", "total_goals", "r16"), fixtures) === null);
+check("resolve: group one-goal games = 0", resolveBonusAnswer(mk("o", "one_goal_games", "group"), fixtures) === "0");
+check("resolve: group goal-fests (3+) = 2", resolveBonusAnswer(mk("h", "high_scoring_games", "group"), fixtures) === "2");
+
+// ---- manager of the round ----
+const mgrs = managersOfRound(entrants, allocations, fixtures, DEFAULT_SCORING);
+check("manager: two rounds have a winner (group + final)", mgrs.length === 2);
+check("manager: group round won by BRA owner", mgrs.find((m) => m.stage === "group")!.entrant.id === "e0");
+check("manager: final round won by BRA owner", mgrs.find((m) => m.stage === "final")!.entrant.id === "e0");
 
 const challenges: BonusChallenge[] = [
-  { id: "c1", kind: "total_goals", prompt: "Goals?", points: 5, locksAt: "2026-06-01T00:00:00Z", answer: "12", createdAt: "" },
-  { id: "c2", kind: "favourite_result", prompt: "Fav?", points: 3, locksAt: "2026-06-01T00:00:00Z", answer: "win", createdAt: "" },
-  { id: "c3", kind: "motm", prompt: "MOTM?", points: 5, locksAt: "2026-06-01T00:00:00Z", answer: null, createdAt: "" }, // unresolved
+  mk("g", "total_goals", "group"), // answer "8"
+  mk("t", "top_scoring_team", "group"), // answer "BRA"
+  mk("u", "total_goals", "r16"), // unresolved
 ];
 const predictions: Prediction[] = [
-  { challengeId: "c1", entrantId: "e0", answer: "12", joker: false }, // +5
-  { challengeId: "c2", entrantId: "e0", answer: "win", joker: true }, // +6 (jokered)
-  { challengeId: "c1", entrantId: "e1", answer: "9", joker: false }, // wrong
-  { challengeId: "c3", entrantId: "e1", answer: "anyone", joker: false }, // unresolved → 0
+  { challengeId: "g", entrantId: "e0", answer: "8", joker: false }, // +5
+  { challengeId: "t", entrantId: "e0", answer: "BRA", joker: true }, // +10 (jokered)
+  { challengeId: "g", entrantId: "e1", answer: "7", joker: false }, // wrong
+  { challengeId: "u", entrantId: "e1", answer: "5", joker: false }, // unresolved → 0
 ];
-const bonus = scoreBonus(challenges, predictions);
-check("bonus: e0 = 5 + (3×2 joker) = 11", bonus.e0 === 11);
+const bonus = scoreBonus(challenges, predictions, fixtures);
+check("bonus: e0 = 5 + (5×2 joker) = 15", bonus.e0 === 15);
 check("bonus: e1 = 0 (wrong + unresolved)", (bonus.e1 ?? 0) === 0);
 
 // bonus points flow into the league table
 const bonusRows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING, {}, bonus);
-check("standings: e0 picks up +11 prediction points (75→86)", bonusRows.find((r) => r.entrant.id === "e0")!.points === 86);
-check("standings: predictionPoints surfaced on row", bonusRows.find((r) => r.entrant.id === "e0")!.predictionPoints === 11);
+check("standings: e0 picks up +15 prediction points (75→90)", bonusRows.find((r) => r.entrant.id === "e0")!.points === 90);
+check("standings: predictionPoints surfaced on row", bonusRows.find((r) => r.entrant.id === "e0")!.predictionPoints === 15);
 
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);

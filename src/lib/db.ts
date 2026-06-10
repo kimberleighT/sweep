@@ -91,6 +91,7 @@ interface MatchRow {
 interface ChallengeRow {
   id: string;
   kind: ChallengeKind;
+  scope: Stage;
   prompt: string;
   points: number;
   locks_at: string;
@@ -140,6 +141,7 @@ function toChallenge(c: ChallengeRow): BonusChallenge {
   return {
     id: c.id,
     kind: c.kind,
+    scope: c.scope,
     prompt: c.prompt,
     points: c.points,
     locksAt: c.locks_at,
@@ -208,26 +210,30 @@ export interface AuthResult {
 
 export async function createLeague(input: {
   name: string;
+  hostName: string;
   hostPin: string;
   scoring: ScoringConfig;
   entryFee: number;
   currency: string;
 }): Promise<AuthResult> {
-  const data = await rpc<{ league_id: string; join_code: string; token: string }>(
-    "create_league",
-    {
-      p_name: input.name,
-      p_host_pin: input.hostPin,
-      p_scoring_config: input.scoring,
-      p_entry_fee: input.entryFee,
-      p_currency: input.currency,
-    }
-  );
+  const data = await rpc<{
+    league_id: string;
+    join_code: string;
+    token: string;
+    entrant_id: string;
+  }>("create_league", {
+    p_name: input.name,
+    p_host_pin: input.hostPin,
+    p_scoring_config: input.scoring,
+    p_entry_fee: input.entryFee,
+    p_currency: input.currency,
+    p_host_name: input.hostName,
+  });
   return {
     token: data.token,
     leagueId: data.league_id,
     joinCode: data.join_code,
-    entrantId: null,
+    entrantId: data.entrant_id, // the host plays too
     isHost: true,
     isNew: true,
   };
@@ -359,7 +365,13 @@ export async function setMatches(token: string, fixtures: Fixture[]): Promise<vo
 
 export async function createChallenge(
   token: string,
-  input: { kind: ChallengeKind; prompt: string; points: number; locksAt: string }
+  input: {
+    kind: ChallengeKind;
+    scope: Stage;
+    prompt: string;
+    points: number;
+    locksAt: string;
+  }
 ): Promise<string> {
   return rpc<string>("create_challenge", {
     p_token: token,
@@ -367,18 +379,7 @@ export async function createChallenge(
     p_prompt: input.prompt,
     p_points: input.points,
     p_locks_at: input.locksAt,
-  });
-}
-
-export async function setChallengeAnswer(
-  token: string,
-  challengeId: string,
-  answer: string | null
-): Promise<void> {
-  await rpc<null>("set_challenge_answer", {
-    p_token: token,
-    p_challenge_id: challengeId,
-    p_answer: answer,
+    p_scope: input.scope,
   });
 }
 
@@ -387,4 +388,39 @@ export async function deleteChallenge(token: string, challengeId: string): Promi
     p_token: token,
     p_challenge_id: challengeId,
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Activity feed + Realtime.
+ * ------------------------------------------------------------------ */
+export interface ActivityItem {
+  id: number;
+  kind: string;
+  text: string;
+  created_at: string;
+}
+
+export async function getActivity(joinCode: string, limit = 30): Promise<ActivityItem[]> {
+  return rpc<ActivityItem[]>("get_activity", { p_join_code: joinCode, p_limit: limit });
+}
+
+/**
+ * Subscribe to a league's public Realtime Broadcast channel. The RPCs broadcast
+ * `{ kind, text }` on `league:<code>` after each action. Returns an unsubscribe.
+ */
+export function subscribeLeague(
+  joinCode: string,
+  onEvent: (payload: { kind: string; text: string }) => void
+): () => void {
+  const sb = client();
+  const ch = sb.channel(`league:${joinCode}`);
+  // supabase-js broadcast typing is finicky; the runtime shape is { payload }.
+  (ch as { on: (...a: unknown[]) => { subscribe: () => void } })
+    .on("broadcast", { event: "activity" }, (msg: { payload?: { kind: string; text: string } }) => {
+      if (msg.payload) onEvent(msg.payload);
+    })
+    .subscribe();
+  return () => {
+    void sb.removeChannel(ch);
+  };
 }

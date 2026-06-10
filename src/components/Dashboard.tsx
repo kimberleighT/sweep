@@ -7,6 +7,8 @@ import { DailyDigest } from "./DailyDigest";
 import { PowerRanking } from "./PowerRanking";
 import { fetchSeasonFixtures, mergeFixtures } from "../lib/api";
 import { TEAMS_BY_CODE } from "../data/teams";
+import { buildScheduleFixtures } from "../data/worldcup2026";
+import { NextUp } from "./Countdown";
 
 type Tab = "table" | "fixtures" | "bonus" | "power";
 
@@ -83,8 +85,20 @@ export function Dashboard({
               </span>
             )}
           </p>
+          <div className="mt-2">
+            <NextUp fixtures={fixtures} challenges={game.challenges ?? []} />
+          </div>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => {
+              onFixtures(mergeFixtures(fixtures, buildScheduleFixtures()));
+              setMsg("Loaded the full 2026 group-stage schedule.");
+            }}
+            className="rounded-lg bg-gold px-4 py-2 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110"
+          >
+            Load 2026 schedule
+          </button>
           <button
             onClick={sync}
             disabled={syncing}
@@ -135,6 +149,7 @@ export function Dashboard({
         <Bonus
           game={game}
           teams={teams}
+          fixtures={fixtures}
           onChallenges={setChallenges}
           onPredictions={setPredictions}
         />

@@ -2,24 +2,29 @@ import { useMemo, useState } from "react";
 import type {
   BonusChallenge,
   ChallengeKind,
+  Fixture,
   Game,
   Prediction,
+  Stage,
   Team,
 } from "../types";
 import {
   CHALLENGE_KINDS,
-  RESULT_OPTIONS,
   challengeStatus,
+  defaultPrompt,
   isCorrect,
   isLocked,
-  jokersUsed,
+  jokerScopesUsed,
   kindMeta,
+  resolveBonusAnswer,
+  STAGE_LABEL,
+  STAGE_ORDER,
 } from "../lib/challenges";
 import { newId } from "../lib/storage";
 import { TEAMS_BY_CODE } from "../data/teams";
 
 /* ------------------------------------------------------------------ *
- * Shared answer/prediction input, keyed off the challenge kind.
+ * Shared prediction input, keyed off the challenge kind (team | number).
  * ------------------------------------------------------------------ */
 export function AnswerInput({
   kind,
@@ -57,48 +62,15 @@ export function AnswerInput({
       </select>
     );
   }
-  if (input === "number") {
-    return (
-      <input
-        type="number"
-        min={0}
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder ?? "0"}
-        className={`${base} w-20`}
-      />
-    );
-  }
-  if (input === "result") {
-    return (
-      <div className="inline-flex overflow-hidden rounded-md border border-white/15">
-        {RESULT_OPTIONS.map((opt) => (
-          <button
-            key={opt}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(value === opt ? "" : opt)}
-            className={`px-2 py-1 text-xs font-bold uppercase tracking-wide transition disabled:opacity-50 ${
-              value === opt
-                ? "bg-gold text-black"
-                : "bg-black/30 text-white/60 hover:text-white"
-            }`}
-          >
-            {opt}
-          </button>
-        ))}
-      </div>
-    );
-  }
   return (
     <input
-      type="text"
+      type="number"
+      min={0}
       disabled={disabled}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder ?? "Answer…"}
-      className={`${base} min-w-[9rem]`}
+      placeholder={placeholder ?? "0"}
+      className={`${base} w-20`}
     />
   );
 }
@@ -107,12 +79,11 @@ export function AnswerInput({
 export function showAnswer(kind: ChallengeKind, value: string): string {
   if (!value) return "—";
   if (kindMeta(kind).input === "team") return TEAMS_BY_CODE[value]?.name ?? value;
-  if (kindMeta(kind).input === "result") return value.toUpperCase();
   return value;
 }
 
 /* ------------------------------------------------------------------ *
- * New-challenge form.
+ * New-challenge form. Kind + round (scope); the answer is auto-computed.
  * ------------------------------------------------------------------ */
 export function NewChallenge({
   onCreate,
@@ -122,24 +93,24 @@ export function NewChallenge({
   onCancel: () => void;
 }) {
   const [kind, setKind] = useState<ChallengeKind>("total_goals");
-  const meta = kindMeta(kind);
-  const [prompt, setPrompt] = useState(meta.samplePrompt);
-  const [points, setPoints] = useState(meta.defaultPoints);
+  const [scope, setScope] = useState<Stage>("group");
+  const [points, setPoints] = useState(CHALLENGE_KINDS.total_goals.defaultPoints);
   const [locksAt, setLocksAt] = useState("");
+
+  const prompt = defaultPrompt(kind, scope);
 
   function pick(k: ChallengeKind) {
     setKind(k);
-    const m = CHALLENGE_KINDS[k];
-    setPrompt(m.samplePrompt);
-    setPoints(m.defaultPoints);
+    setPoints(CHALLENGE_KINDS[k].defaultPoints);
   }
 
   function submit() {
-    if (!prompt.trim() || !locksAt) return;
+    if (!locksAt) return;
     onCreate({
       id: newId(),
       kind,
-      prompt: prompt.trim(),
+      scope,
+      prompt,
       points,
       // datetime-local has no zone; treat as local and store ISO
       locksAt: new Date(locksAt).toISOString(),
@@ -174,18 +145,28 @@ export function NewChallenge({
         })}
       </div>
 
-      <label className="block">
-        <span className="mb-1 block text-xs uppercase tracking-wider text-white/40">
-          Question
-        </span>
-        <input
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          className="w-full rounded-md border border-white/15 bg-black/30 px-3 py-2 text-sm outline-none focus:border-gold"
-        />
-      </label>
+      <p className="rounded-md bg-black/30 px-3 py-2 text-sm text-white/80">{prompt}</p>
+      <p className="text-xs text-white/40">
+        🤖 Auto-scored from the results once every {STAGE_LABEL[scope]} match is finished.
+      </p>
 
       <div className="flex flex-wrap gap-4">
+        <label className="block">
+          <span className="mb-1 block text-xs uppercase tracking-wider text-white/40">
+            Round
+          </span>
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as Stage)}
+            className="rounded-md border border-white/15 bg-black/30 px-2 py-2 text-sm outline-none focus:border-gold"
+          >
+            {STAGE_ORDER.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_LABEL[s]}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="block">
           <span className="mb-1 block text-xs uppercase tracking-wider text-white/40">
             Points
@@ -215,7 +196,7 @@ export function NewChallenge({
         <button
           type="button"
           onClick={submit}
-          disabled={!prompt.trim() || !locksAt}
+          disabled={!locksAt}
           className="rounded-lg bg-gold px-4 py-2 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-40"
         >
           Add challenge
@@ -250,29 +231,29 @@ function ChallengeCard({
   challenge,
   game,
   teams,
-  jokerUsedBy,
+  fixtures,
+  jokerScopes,
   onPredict,
   onToggleJoker,
-  onResolve,
   onDelete,
 }: {
   challenge: BonusChallenge;
   game: Game;
   teams: Team[];
-  jokerUsedBy: Set<string>;
+  fixtures: Fixture[];
+  jokerScopes: Map<string, Set<Stage>>;
   onPredict: (entrantId: string, answer: string) => void;
   onToggleJoker: (entrantId: string) => void;
-  onResolve: (answer: string | null) => void;
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const meta = kindMeta(challenge.kind);
-  const status = challengeStatus(challenge);
+  const status = challengeStatus(challenge, fixtures);
   const locked = isLocked(challenge);
+  const answer = resolveBonusAnswer(challenge, fixtures);
   const preds = game.predictions ?? [];
   const predFor = (entrantId: string) =>
     preds.find((p) => p.challengeId === challenge.id && p.entrantId === entrantId);
-  const [answerDraft, setAnswerDraft] = useState(challenge.answer ?? "");
 
   const lockLabel = new Date(challenge.locksAt).toLocaleString(undefined, {
     weekday: "short",
@@ -291,7 +272,7 @@ function ChallengeCard({
           <span>
             <span className="block font-bold">{challenge.prompt}</span>
             <span className="block text-xs uppercase tracking-wider text-white/40">
-              {challenge.points} pts · locks {lockLabel}
+              {challenge.points} pts · {STAGE_LABEL[challenge.scope]} · locks {lockLabel}
             </span>
           </span>
         </span>
@@ -304,33 +285,15 @@ function ChallengeCard({
 
       {expanded && (
         <div className="space-y-3 border-t border-white/10 px-4 py-3">
-          {/* resolve */}
-          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 p-2">
-            <span className="text-xs uppercase tracking-wider text-white/40">
-              Correct answer
-            </span>
-            <AnswerInput
-              kind={challenge.kind}
-              teams={teams}
-              value={answerDraft}
-              onChange={setAnswerDraft}
-            />
-            <button
-              onClick={() => onResolve(answerDraft || null)}
-              className="rounded-md bg-gold px-3 py-1 text-xs font-black uppercase tracking-wide text-black hover:brightness-110"
-            >
-              {status === "resolved" ? "Update" : "Award"}
-            </button>
-            {status === "resolved" && (
-              <button
-                onClick={() => {
-                  setAnswerDraft("");
-                  onResolve(null);
-                }}
-                className="rounded-md border border-white/20 px-3 py-1 text-xs font-bold uppercase tracking-wide hover:bg-white/10"
-              >
-                Clear
-              </button>
+          {/* auto-resolved answer */}
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 p-2 text-sm">
+            <span className="text-xs uppercase tracking-wider text-white/40">Answer</span>
+            {answer !== null ? (
+              <span className="font-bold text-gold">{showAnswer(challenge.kind, answer)}</span>
+            ) : (
+              <span className="text-white/40">
+                pending — scores once the {STAGE_LABEL[challenge.scope]} finishes
+              </span>
             )}
           </div>
 
@@ -341,19 +304,17 @@ function ChallengeCard({
                 const p = predFor(e.id);
                 const ans = p?.answer ?? "";
                 const correct =
-                  status === "resolved" &&
-                  isCorrect(challenge.kind, challenge.answer as string, ans);
+                  answer !== null && isCorrect(challenge.kind, answer, ans);
                 const jokerHere = !!p?.joker;
-                const jokerDisabled =
-                  locked || (jokerUsedBy.has(e.id) && !jokerHere);
+                const jokerUsedThisRound =
+                  !!jokerScopes.get(e.id)?.has(challenge.scope) && !jokerHere;
+                const jokerDisabled = locked || jokerUsedThisRound;
                 return (
                   <tr key={e.id} className="border-t border-white/5">
                     <td className="py-1.5 pr-2 font-semibold">{e.name}</td>
                     <td className="py-1.5 pr-2">
                       {locked ? (
-                        <span className="text-white/70">
-                          {showAnswer(challenge.kind, ans)}
-                        </span>
+                        <span className="text-white/70">{showAnswer(challenge.kind, ans)}</span>
                       ) : (
                         <AnswerInput
                           kind={challenge.kind}
@@ -371,8 +332,8 @@ function ChallengeCard({
                         title={
                           jokerHere
                             ? "Joker played here (2×)"
-                            : jokerUsedBy.has(e.id)
-                              ? "Joker already used on another challenge"
+                            : jokerUsedThisRound
+                              ? "Joker already used this round"
                               : "Play Joker (doubles points if correct)"
                         }
                         className={`rounded-md px-2 py-1 text-xs font-bold ring-1 transition disabled:opacity-30 ${
@@ -403,8 +364,8 @@ function ChallengeCard({
 
           {!locked && (
             <p className="text-xs text-white/40">
-              Enter each player's pick before kickoff. 🃏 = Joker (one per player,
-              doubles that prediction).
+              Enter each player's pick before kickoff. 🃏 = Joker (one per round,
+              doubles that prediction). Scored automatically from the results.
             </p>
           )}
 
@@ -423,16 +384,18 @@ function ChallengeCard({
 }
 
 /* ------------------------------------------------------------------ *
- * Bonus tab.
+ * Bonus tab (quick-play: host enters every player's pick on one device).
  * ------------------------------------------------------------------ */
 export function Bonus({
   game,
   teams,
+  fixtures,
   onChallenges,
   onPredictions,
 }: {
   game: Game;
   teams: Team[];
+  fixtures: Fixture[];
   onChallenges: (c: BonusChallenge[]) => void;
   onPredictions: (p: Prediction[]) => void;
 }) {
@@ -440,14 +403,13 @@ export function Bonus({
   const challenges = game.challenges ?? [];
   const predictions = game.predictions ?? [];
 
-  const jokerUsedBy = useMemo(() => jokersUsed(predictions), [predictions]);
+  const jokerScopes = useMemo(
+    () => jokerScopesUsed(predictions, challenges),
+    [predictions, challenges]
+  );
 
-  // newest lock time first amongst open, resolved sink to the bottom
   const ordered = useMemo(
-    () =>
-      [...challenges].sort(
-        (a, b) => Date.parse(a.locksAt) - Date.parse(b.locksAt)
-      ),
+    () => [...challenges].sort((a, b) => Date.parse(a.locksAt) - Date.parse(b.locksAt)),
     [challenges]
   );
 
@@ -461,10 +423,6 @@ export function Bonus({
     onPredictions(predictions.filter((p) => p.challengeId !== id));
   }
 
-  function resolve(id: string, answer: string | null) {
-    onChallenges(challenges.map((c) => (c.id === id ? { ...c, answer } : c)));
-  }
-
   function predict(challengeId: string, entrantId: string, answer: string) {
     const rest = predictions.filter(
       (p) => !(p.challengeId === challengeId && p.entrantId === entrantId)
@@ -473,7 +431,6 @@ export function Bonus({
       (p) => p.challengeId === challengeId && p.entrantId === entrantId
     );
     if (!answer) {
-      // clearing the pick also clears its joker
       onPredictions(rest);
       return;
     }
@@ -490,12 +447,8 @@ export function Bonus({
     const rest = predictions.filter(
       (p) => !(p.challengeId === challengeId && p.entrantId === entrantId)
     );
-    // need an answer to anchor the joker; default to empty pick otherwise
     const answer = prev?.answer ?? "";
-    onPredictions([
-      ...rest,
-      { challengeId, entrantId, answer, joker: !prev?.joker },
-    ]);
+    onPredictions([...rest, { challengeId, entrantId, answer, joker: !prev?.joker }]);
   }
 
   return (
@@ -520,10 +473,9 @@ export function Bonus({
 
       {ordered.length === 0 && !adding && (
         <p className="rounded-xl border border-white/10 bg-black/20 px-3 py-6 text-center text-sm text-white/40">
-          No bonus challenges yet. Add prediction rounds — total goals, top team,
-          biggest margin, MOTM — to keep everyone engaged. Each correct pick adds
-          points to the league table, and every player gets one 🃏 Joker to double a
-          round.
+          No bonus challenges yet. Add prediction rounds — total goals, biggest margin,
+          top-scoring team — and they score themselves from the results. Every player gets
+          one 🃏 Joker to double a round.
         </p>
       )}
 
@@ -533,10 +485,10 @@ export function Bonus({
           challenge={c}
           game={game}
           teams={teams}
-          jokerUsedBy={jokerUsedBy}
+          fixtures={fixtures}
+          jokerScopes={jokerScopes}
           onPredict={(entrantId, answer) => predict(c.id, entrantId, answer)}
           onToggleJoker={(entrantId) => toggleJoker(c.id, entrantId)}
-          onResolve={(answer) => resolve(c.id, answer)}
           onDelete={() => deleteChallenge(c.id)}
         />
       ))}

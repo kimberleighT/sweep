@@ -4,10 +4,13 @@ import { TEAMS_BY_CODE, flagUrl } from "../data/teams";
 
 function FixtureLine({ of }: { of: OwnedFixture }) {
   const { fixture: f, homeTeam, awayTeam, homeOwner, awayOwner } = of;
-  const time = f.kickoff.slice(11, 16);
+  const d = new Date(f.kickoff);
+  const date = Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
   return (
     <div className="flex items-center gap-2 border-t border-white/5 px-3 py-1.5 text-sm first:border-t-0">
-      <span className="w-10 shrink-0 text-xs text-white/40">{time || "—"}</span>
+      <span className="w-12 shrink-0 text-xs text-white/40">{date || "—"}</span>
       <span className="flex flex-1 items-center justify-end gap-1.5 text-right">
         <span className="truncate">{homeTeam?.name ?? f.homeCode}</span>
         {homeOwner && <span className="text-[10px] text-gold">({homeOwner})</span>}
