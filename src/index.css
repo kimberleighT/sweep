@@ -1,0 +1,23 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700;800;900&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #14583d 0%, transparent 60%),
+    linear-gradient(180deg, #0b3d2e 0%, #06241a 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  color: #f4f7f5;
+  font-family: "Archivo", system-ui, sans-serif;
+}
+
+.card {
+  @apply rounded-2xl border border-white/10 bg-white/5 backdrop-blur;
+}

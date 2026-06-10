@@ -1,0 +1,118 @@
+// Standalone sanity checks for the pure engines. Run:
+//   node --experimental-strip-types scripts/verify.ts
+import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
+import { buildStandings, DEFAULT_SCORING } from "../src/lib/scoring.ts";
+import { isCorrect, scoreBonus } from "../src/lib/challenges.ts";
+import { TEAMS } from "../src/data/teams.ts";
+import type { BonusChallenge, Entrant, Fixture, Prediction } from "../src/types.ts";
+
+let failed = 0;
+function check(name: string, cond: boolean) {
+  console.log(`${cond ? "PASS" : "FAIL"}  ${name}`);
+  if (!cond) failed++;
+}
+
+// ---- dataset ----
+check("48 teams in dataset", TEAMS.length === 48);
+check("12 teams per pot", [1, 2, 3, 4].every((p) => TEAMS.filter((t) => t.pot === p).length === 12));
+
+// ---- seeded draw ----
+const mkEntrants = (n: number): Entrant[] =>
+  Array.from({ length: n }, (_, i) => ({ id: `e${i}`, name: `P${i}` }));
+
+for (const n of [2, 5, 6, 7, 8, 13]) {
+  const entrants = mkEntrants(n);
+  const { picks, allocations } = drawSeededPots(entrants, TEAMS);
+  const total = allocations.reduce((s, a) => s + a.teamCodes.length, 0);
+  const counts = allocations.map((a) => a.teamCodes.length);
+  const spread = Math.max(...counts) - Math.min(...counts);
+  const allCodes = allocations.flatMap((a) => a.teamCodes);
+  const unique = new Set(allCodes).size;
+  check(`n=${n}: all 48 teams allocated`, total === 48 && picks.length === 48);
+  check(`n=${n}: no duplicate teams`, unique === 48);
+  check(`n=${n}: balanced (max-min ≤ 1 team)`, spread <= 1);
+  // each entrant should get a roughly even pot spread (≤1 per pot diff)
+  const potBalanced = entrants.every((e) => {
+    const codes = allocations.find((a) => a.entrantId === e.id)!.teamCodes;
+    const perPot = [1, 2, 3, 4].map(
+      (p) => codes.filter((c) => TEAMS.find((t) => t.code === c)!.pot === p).length
+    );
+    return Math.max(...perPot) - Math.min(...perPot) <= 1;
+  });
+  check(`n=${n}: each entrant balanced across pots`, potBalanced);
+}
+
+check("describeSplit 8 → even", describeSplit(8, 48) === "6 teams each");
+check("describeSplit 5 → remainder", describeSplit(5, 48).includes("get 10"));
+
+// ---- scoring ----
+const entrants = mkEntrants(2); // e0, e1
+const { allocations } = (() => {
+  // hand-pick a known allocation: e0 = BRA, e1 = ARG
+  return {
+    allocations: [
+      { entrantId: "e0", teamCodes: ["BRA"] },
+      { entrantId: "e1", teamCodes: ["ARG"] },
+    ],
+  };
+})();
+
+const fixtures: Fixture[] = [
+  // group: BRA wins 3-1, ARG draws 2-2
+  { id: "1", stage: "group", group: "A", kickoff: "", homeCode: "BRA", awayCode: "GER", homeScore: 3, awayScore: 1, status: "finished" },
+  { id: "2", stage: "group", group: "B", kickoff: "", homeCode: "ARG", awayCode: "ESP", homeScore: 2, awayScore: 2, status: "finished" },
+  // final: BRA beats ARG 1-0
+  { id: "3", stage: "final", group: null, kickoff: "", homeCode: "BRA", awayCode: "ARG", homeScore: 1, awayScore: 0, status: "finished" },
+];
+
+const rows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING);
+const e0 = rows.find((r) => r.entrant.id === "e0")!;
+const e1 = rows.find((r) => r.entrant.id === "e1")!;
+
+// BRA: group win 3 + 3 goals = 6; final win 3 + 1 goal = 4; winnerBonus 40
+// reach bonuses: BRA appears in group + final only → reach.final = 25
+// e0 = 6 + 4 + 40 + 25 = 75
+check("BRA owner points = 75", e0.points === 75);
+check("BRA owner bonus = 65 (final reach 25 + winner 40)", e0.bonus === 65);
+// ARG: group draw 1 + 2 goals = 3; final loss 0 + 0 goals = 0; reach.final 25
+// e1 = 1 + 2 + 25 = 28
+check("ARG owner points = 28", e1.points === 28);
+check("leader is BRA owner", rows[0]!.entrant.id === "e0");
+check("BRA still alive after winning final", e0.alive === 1);
+check("ARG eliminated after losing final", e1.alive === 0);
+
+// captain doubles BRA's contribution: 75 -> 150
+const capRows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING, {
+  e0: "BRA",
+});
+check("captain doubles BRA owner to 150", capRows.find((r) => r.entrant.id === "e0")!.points === 150);
+
+// ---- bonus challenges ----
+check("isCorrect: number tolerant of text", isCorrect("total_goals", "12", "12") === true);
+check("isCorrect: number mismatch", isCorrect("total_goals", "12", "11") === false);
+check("isCorrect: result case-insensitive", isCorrect("favourite_result", "WIN", "win") === true);
+check("isCorrect: blank answer never correct", isCorrect("motm", "", "Messi") === false);
+check("isCorrect: text trims & collapses spaces", isCorrect("motm", " Lionel  Messi ", "lionel messi") === true);
+
+const challenges: BonusChallenge[] = [
+  { id: "c1", kind: "total_goals", prompt: "Goals?", points: 5, locksAt: "2026-06-01T00:00:00Z", answer: "12", createdAt: "" },
+  { id: "c2", kind: "favourite_result", prompt: "Fav?", points: 3, locksAt: "2026-06-01T00:00:00Z", answer: "win", createdAt: "" },
+  { id: "c3", kind: "motm", prompt: "MOTM?", points: 5, locksAt: "2026-06-01T00:00:00Z", answer: null, createdAt: "" }, // unresolved
+];
+const predictions: Prediction[] = [
+  { challengeId: "c1", entrantId: "e0", answer: "12", joker: false }, // +5
+  { challengeId: "c2", entrantId: "e0", answer: "win", joker: true }, // +6 (jokered)
+  { challengeId: "c1", entrantId: "e1", answer: "9", joker: false }, // wrong
+  { challengeId: "c3", entrantId: "e1", answer: "anyone", joker: false }, // unresolved → 0
+];
+const bonus = scoreBonus(challenges, predictions);
+check("bonus: e0 = 5 + (3×2 joker) = 11", bonus.e0 === 11);
+check("bonus: e1 = 0 (wrong + unresolved)", (bonus.e1 ?? 0) === 0);
+
+// bonus points flow into the league table
+const bonusRows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING, {}, bonus);
+check("standings: e0 picks up +11 prediction points (75→86)", bonusRows.find((r) => r.entrant.id === "e0")!.points === 86);
+check("standings: predictionPoints surfaced on row", bonusRows.find((r) => r.entrant.id === "e0")!.predictionPoints === 11);
+
+console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
+process.exit(failed === 0 ? 0 : 1);
