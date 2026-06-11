@@ -136,16 +136,37 @@ export async function fetchSeasonFixtures(teams: Team[]): Promise<SyncResult> {
 }
 
 /**
- * Merge freshly-synced fixtures into the existing set without clobbering
- * manual edits: a fixture the host typed by hand (manual=true) wins over
- * the API for that match.
+ * Merge incoming fixtures into the existing set by the *match itself*, not by id
+ * — the same game arrives from the bundled schedule (id `wc:N`) and the API
+ * (id `api:N`), so id-based merging would duplicate it. We key on the unordered
+ * team pair + stage, then:
+ *  - if the match already exists, copy any incoming scores onto it (oriented to
+ *    the existing home/away), unless the existing one was typed by hand (manual);
+ *  - otherwise add it as a genuinely new fixture.
  */
 export function mergeFixtures(existing: Fixture[], incoming: Fixture[]): Fixture[] {
-  const byId = new Map(existing.map((f) => [f.id, f]));
-  for (const f of incoming) {
-    const prev = byId.get(f.id);
-    if (prev?.manual) continue;
-    byId.set(f.id, f);
+  const keyOf = (f: Fixture) =>
+    `${[f.homeCode, f.awayCode].slice().sort().join("|")}:${f.stage}`;
+  const incByKey = new Map<string, Fixture>();
+  for (const f of incoming) incByKey.set(keyOf(f), f);
+
+  const seen = new Set<string>();
+  const merged = existing.map((f) => {
+    const k = keyOf(f);
+    seen.add(k);
+    const inc = incByKey.get(k);
+    if (!inc || f.manual) return f;
+    if (inc.homeScore === null || inc.awayScore === null) return f;
+    const sameOrientation = f.homeCode === inc.homeCode;
+    return {
+      ...f,
+      homeScore: sameOrientation ? inc.homeScore : inc.awayScore,
+      awayScore: sameOrientation ? inc.awayScore : inc.homeScore,
+      status: "finished" as const,
+    };
+  });
+  for (const inc of incoming) {
+    if (!seen.has(keyOf(inc))) merged.push(inc);
   }
-  return [...byId.values()].sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+  return merged.sort((a, b) => a.kickoff.localeCompare(b.kickoff));
 }

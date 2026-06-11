@@ -325,7 +325,12 @@ export function LeagueRoom({
                 disabled={busy}
                 onClick={() =>
                   void act(async () => {
-                    await setMatches(session.token, buildScheduleFixtures());
+                    // base = clean schedule, overlay current scores: seeds the
+                    // 72 fixtures, preserves results, and de-dupes any old rows.
+                    await setMatches(
+                      session.token,
+                      mergeFixtures(buildScheduleFixtures(), fixtures)
+                    );
                     setMsg("Loaded the full 2026 group-stage schedule.");
                   })
                 }

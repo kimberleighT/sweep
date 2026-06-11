@@ -92,7 +92,7 @@ export function Dashboard({
         <div className="flex gap-2">
           <button
             onClick={() => {
-              onFixtures(mergeFixtures(fixtures, buildScheduleFixtures()));
+              onFixtures(mergeFixtures(buildScheduleFixtures(), fixtures));
               setMsg("Loaded the full 2026 group-stage schedule.");
             }}
             className="rounded-lg bg-gold px-4 py-2 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110"

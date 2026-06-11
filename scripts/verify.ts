@@ -3,6 +3,7 @@
 import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
 import { buildStandings, DEFAULT_SCORING, managersOfRound } from "../src/lib/scoring.ts";
 import { isCorrect, resolveBonusAnswer, scoreBonus } from "../src/lib/challenges.ts";
+import { mergeFixtures } from "../src/lib/api.ts";
 import { TEAMS } from "../src/data/teams.ts";
 import type { BonusChallenge, Entrant, Fixture, Prediction } from "../src/types.ts";
 
@@ -130,6 +131,19 @@ check("bonus: e1 = 0 (wrong + unresolved)", (bonus.e1 ?? 0) === 0);
 const bonusRows = buildStandings(entrants, allocations, fixtures, DEFAULT_SCORING, {}, bonus);
 check("standings: e0 picks up +15 prediction points (75→90)", bonusRows.find((r) => r.entrant.id === "e0")!.points === 90);
 check("standings: predictionPoints surfaced on row", bonusRows.find((r) => r.entrant.id === "e0")!.predictionPoints === 15);
+
+// ---- fixture merge dedupe (schedule + API are the same match, diff ids) ----
+const sched: Fixture[] = [
+  { id: "wc:1", stage: "group", group: "A", kickoff: "2026-06-11T00:00:00", homeCode: "MEX", awayCode: "RSA", homeScore: null, awayScore: null, status: "scheduled" },
+];
+const apiRows: Fixture[] = [
+  { id: "api:1", stage: "group", group: null, kickoff: "2026-06-11T19:00:00", homeCode: "RSA", awayCode: "MEX", homeScore: 1, awayScore: 2, status: "finished" },
+];
+const mergedFx = mergeFixtures(sched, apiRows);
+check("merge: same match isn't duplicated", mergedFx.length === 1);
+check("merge: score oriented to existing home/away", mergedFx[0]!.homeScore === 2 && mergedFx[0]!.awayScore === 1);
+const deduped = mergeFixtures(sched, [...sched, ...apiRows]); // base + (dup + api)
+check("merge: collapses pre-existing duplicate", deduped.length === 1);
 
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);
