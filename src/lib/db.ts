@@ -390,6 +390,11 @@ export async function deleteChallenge(token: string, challengeId: string): Promi
   });
 }
 
+/** Host-only: permanently delete the whole league (everything cascades). */
+export async function deleteLeague(token: string): Promise<void> {
+  await rpc<null>("delete_league", { p_token: token });
+}
+
 /* ------------------------------------------------------------------ *
  * Activity feed + Realtime.
  * ------------------------------------------------------------------ */

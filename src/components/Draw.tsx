@@ -44,8 +44,15 @@ export function Draw({
   const [present, setPresent] = useState(false);
   const busy = useRef(false);
   const timers = useRef<number[]>([]);
+  const spinRef = useRef<number | null>(null);
 
-  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+  useEffect(
+    () => () => {
+      timers.current.forEach((t) => window.clearTimeout(t));
+      if (spinRef.current !== null) window.clearInterval(spinRef.current);
+    },
+    []
+  );
 
   const entrantById = useMemo(
     () => new Map(game.entrants.map((e) => [e.id, e])),
@@ -59,6 +66,19 @@ export function Draw({
   }, [picks, index, game.entrants]);
 
   const done = index >= picks.length;
+
+  // Once the draw is complete, hard-stop everything so nothing keeps animating.
+  useEffect(() => {
+    if (!done) return;
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [];
+    if (spinRef.current !== null) {
+      window.clearInterval(spinRef.current);
+      spinRef.current = null;
+    }
+    setSpinCode(null);
+    setRevealing(null);
+  }, [done]);
 
   function drawNext() {
     if (busy.current || index >= picks.length) return;
@@ -75,9 +95,11 @@ export function Draw({
       if (!isMuted()) tick();
       spins++;
     }, 80);
+    spinRef.current = spin;
 
     const settle = window.setTimeout(() => {
       window.clearInterval(spin);
+      spinRef.current = null;
       setSpinCode(null); // reveal the real team
       if (pick.pot === 1) {
         airhorn();
@@ -191,7 +213,7 @@ export function Draw({
       {done && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-gold/15 px-4 py-3">
           <span className={`font-black text-gold ${present ? "text-3xl" : "text-lg"}`}>
-            🏆 Draw complete — good luck!
+            🏆 Draw complete
           </span>
           <button
             onClick={() => onComplete(allocations)}
@@ -202,8 +224,13 @@ export function Draw({
         </div>
       )}
 
-      {/* Reveal stage */}
+      {/* Reveal stage — static once the draw is done (no flicker, no spinning). */}
       <div className={`relative my-4 flex items-center justify-center ${present ? "h-72" : "h-44"}`}>
+        {done ? (
+          <div className={`text-center font-black text-gold ${present ? "text-5xl" : "text-3xl"}`}>
+            🏆 All teams allocated — good luck!
+          </div>
+        ) : (
         <AnimatePresence mode="wait">
           {revealTeam && (
             <motion.div
@@ -241,22 +268,13 @@ export function Draw({
               )}
             </motion.div>
           )}
-          {!revealTeam && !done && (
+          {!revealTeam && (
             <motion.p key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-white/40">
               Tap “Draw next” to pull the next team from the pot…
             </motion.p>
           )}
-          {done && (
-            <motion.p
-              key="done"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className={`font-black text-gold ${present ? "text-5xl" : "text-2xl"}`}
-            >
-              🏆 All teams allocated!
-            </motion.p>
-          )}
         </AnimatePresence>
+        )}
       </div>
 
       {/* Entrant columns (hidden in presentation mode once done, to show rankings) */}

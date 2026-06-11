@@ -10,6 +10,7 @@ import { fetchSeasonFixtures, mergeFixtures } from "../lib/api";
 import {
   createChallenge,
   deleteChallenge,
+  deleteLeague,
   getActivity,
   getLeagueState,
   setAllocations,
@@ -144,6 +145,19 @@ export function LeagueRoom({
     }
   }
 
+  // Host-only: wipe the league for everyone, with a clear warning first.
+  function resetLeague() {
+    const ok = confirm(
+      "⚠️ Reset the WHOLE league?\n\n" +
+        "This permanently deletes it for EVERYONE — all players, teams, " +
+        "predictions and results. This cannot be undone."
+    );
+    if (!ok) return;
+    void deleteLeague(session.token)
+      .then(() => onLeave())
+      .catch((e) => setError((e as Error).message));
+  }
+
   if (!state) {
     return (
       <div className="mx-auto max-w-md p-10 text-center text-white/60">
@@ -196,7 +210,7 @@ export function LeagueRoom({
 
     if (isHost) {
       return (
-        <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
+        <LeagueShell state={state} pot={pot} activity={activity} onReset={viewer.isHost ? resetLeague : undefined} onLeave={onLeave} onRefresh={() => void refresh()}>
           <div className="card space-y-4 p-6">
             <p className="text-sm text-white/70">
               Share code{" "}
@@ -248,7 +262,7 @@ export function LeagueRoom({
     }
 
     return (
-      <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
+      <LeagueShell state={state} pot={pot} activity={activity} onReset={viewer.isHost ? resetLeague : undefined} onLeave={onLeave} onRefresh={() => void refresh()}>
         <div className="card p-8 text-center">
           <p className="text-lg font-bold">Waiting for the draw…</p>
           <p className="mt-2 text-sm text-white/60">
@@ -262,7 +276,7 @@ export function LeagueRoom({
 
   // ----- in play -----
   return (
-    <LeagueShell state={state} pot={pot} activity={activity} onLeave={onLeave} onRefresh={() => void refresh()}>
+    <LeagueShell state={state} pot={pot} activity={activity} onReset={viewer.isHost ? resetLeague : undefined} onLeave={onLeave} onRefresh={() => void refresh()}>
       {error && (
         <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {error}
@@ -375,6 +389,7 @@ function LeagueShell({
   state,
   pot,
   activity,
+  onReset,
   onLeave,
   onRefresh,
   children,
@@ -382,6 +397,8 @@ function LeagueShell({
   state: LeagueState;
   pot: number;
   activity: ActivityItem[];
+  /** Provided only for the host — resets (deletes) the whole league. */
+  onReset?: () => void;
   onLeave: () => void;
   onRefresh: () => void;
   children: React.ReactNode;
@@ -424,6 +441,15 @@ function LeagueShell({
           >
             Leave
           </button>
+          {onReset && (
+            <button
+              onClick={onReset}
+              title="Host only — permanently deletes the league for everyone"
+              className="rounded-lg border border-red-500/40 px-3 py-2 text-sm font-bold uppercase tracking-wide text-red-300 transition hover:bg-red-500/10"
+            >
+              Reset
+            </button>
+          )}
         </div>
       </header>
 
