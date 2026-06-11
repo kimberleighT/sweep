@@ -4,6 +4,8 @@ import type {
   Entrant,
   Fixture,
   Prediction,
+  PredictPick,
+  PredictRound,
   ScoringConfig,
   Stage,
   StandingRow,
@@ -188,6 +190,45 @@ export function buildStandings(
       a.entrant.name.localeCompare(b.entrant.name)
   );
   return rows;
+}
+
+const resultSign = (a: number, b: number): number => (a > b ? 1 : a < b ? -1 : 0);
+
+/**
+ * Match Day points per entrant: for each pick whose assigned game has finished,
+ * an exact score scores `points_score`, a correct result (only) `points_result`,
+ * else nothing. Fully derived from the results.
+ */
+export function scoreMatchDay(
+  rounds: PredictRound[],
+  picks: PredictPick[],
+  fixtures: Fixture[]
+): Record<string, number> {
+  const roundById = new Map(rounds.map((r) => [r.id, r]));
+  const fxById = new Map(fixtures.map((f) => [f.id, f]));
+  const out: Record<string, number> = {};
+  for (const p of picks) {
+    if (p.homeScore === null || p.awayScore === null) continue;
+    const f = fxById.get(p.matchId);
+    if (!f || f.status !== "finished" || f.homeScore === null || f.awayScore === null) continue;
+    const r = roundById.get(p.roundId);
+    if (!r) continue;
+    const exact = p.homeScore === f.homeScore && p.awayScore === f.awayScore;
+    const sameResult = resultSign(p.homeScore, p.awayScore) === resultSign(f.homeScore, f.awayScore);
+    const pts = exact ? r.pointsScore : sameResult ? r.pointsResult : 0;
+    if (pts) out[p.entrantId] = (out[p.entrantId] ?? 0) + pts;
+  }
+  return out;
+}
+
+/** Sum two per-entrant point maps into one. */
+export function mergePoints(
+  a: Record<string, number>,
+  b: Record<string, number>
+): Record<string, number> {
+  const out: Record<string, number> = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + v;
+  return out;
 }
 
 export interface RoundManager {

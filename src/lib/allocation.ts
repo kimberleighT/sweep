@@ -27,6 +27,13 @@ function shuffle<T>(arr: T[]): T[] {
  * strength tiers. The starting entrant rotates between pots, so when a
  * pot doesn't divide evenly the "extra" teams are shared out fairly
  * rather than always landing with the first few entrants.
+ *
+ * Seed guarantee: Pot 1 (the seeded teams) is dealt FIRST, one per entrant
+ * from entrant 0, so every player gets a seeded team as long as there are at
+ * least as many seeds as players (12 seeds → up to 12 players). With more
+ * players than seeds it's impossible to give everyone one, but the pot
+ * rotation then hands the seedless players the first (strongest) picks of
+ * Pot 2 — so nobody is left with only weak teams.
  */
 export function drawSeededPots(entrants: Entrant[], teams: Team[]): DrawResult {
   const picks: Pick[] = [];

@@ -17,6 +17,8 @@ import type {
   ChallengeKind,
   Fixture,
   Game,
+  PredictPick,
+  PredictRound,
   ScoringConfig,
   Stage,
 } from "../types";
@@ -104,6 +106,20 @@ interface PredictionRow {
   answer: string;
   is_joker: boolean;
 }
+interface PredictRoundRow {
+  id: string;
+  game_date: string;
+  locks_at: string;
+  points_result: number;
+  points_score: number;
+}
+interface PredictPickRow {
+  round_id: string;
+  entrant_id: string;
+  match_id: string;
+  home_score: number | null;
+  away_score: number | null;
+}
 interface LeagueStateRow {
   league: LeagueRow;
   viewer: { entrant_id: string | null; is_host: boolean };
@@ -112,6 +128,8 @@ interface LeagueStateRow {
   matches: MatchRow[];
   bonus_challenges: ChallengeRow[];
   predictions: PredictionRow[];
+  predict_rounds: PredictRoundRow[];
+  predict_picks: PredictPickRow[];
 }
 
 /** The reshaped league: a Game (as the components expect) + fixtures + viewer. */
@@ -120,6 +138,8 @@ export interface LeagueState {
   game: Game;
   fixtures: Fixture[];
   viewer: { entrantId: string | null; isHost: boolean };
+  predictRounds: PredictRound[];
+  predictPicks: PredictPick[];
 }
 
 function toFixture(m: MatchRow): Fixture {
@@ -193,6 +213,20 @@ function reshape(row: LeagueStateRow): LeagueState {
       entrantId: row.viewer.entrant_id,
       isHost: row.viewer.is_host,
     },
+    predictRounds: row.predict_rounds.map((r) => ({
+      id: r.id,
+      gameDate: r.game_date,
+      locksAt: r.locks_at,
+      pointsResult: r.points_result,
+      pointsScore: r.points_score,
+    })),
+    predictPicks: row.predict_picks.map((p) => ({
+      roundId: p.round_id,
+      entrantId: p.entrant_id,
+      matchId: p.match_id,
+      homeScore: p.home_score,
+      awayScore: p.away_score,
+    })),
   };
 }
 
@@ -393,6 +427,45 @@ export async function deleteChallenge(token: string, challengeId: string): Promi
 /** Host-only: permanently delete the whole league (everything cascades). */
 export async function deleteLeague(token: string): Promise<void> {
   await rpc<null>("delete_league", { p_token: token });
+}
+
+/* ------------------------------------------------------------------ *
+ * Match Day predictions.
+ * ------------------------------------------------------------------ */
+export async function createPredictRound(
+  token: string,
+  input: { gameDate: string; locksAt: string; pointsResult: number; pointsScore: number }
+): Promise<string> {
+  return rpc<string>("create_predict_round", {
+    p_token: token,
+    p_game_date: input.gameDate,
+    p_locks_at: input.locksAt,
+    p_points_result: input.pointsResult,
+    p_points_score: input.pointsScore,
+  });
+}
+
+export async function deletePredictRound(token: string, roundId: string): Promise<void> {
+  await rpc<null>("delete_predict_round", { p_token: token, p_round_id: roundId });
+}
+
+/** Assigns the player a random game for the round (idempotent); pick lands in state. */
+export async function assignMatchday(token: string, roundId: string): Promise<void> {
+  await rpc<unknown>("assign_matchday", { p_token: token, p_round_id: roundId });
+}
+
+export async function submitPredict(
+  token: string,
+  roundId: string,
+  homeScore: number,
+  awayScore: number
+): Promise<void> {
+  await rpc<null>("submit_predict", {
+    p_token: token,
+    p_round_id: roundId,
+    p_home_score: homeScore,
+    p_away_score: awayScore,
+  });
 }
 
 /* ------------------------------------------------------------------ *

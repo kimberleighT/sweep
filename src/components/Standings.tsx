@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import type { Fixture, Game } from "../types";
-import { buildStandings, managersOfRound } from "../lib/scoring";
+import type { Fixture, Game, PredictPick, PredictRound } from "../types";
+import { buildStandings, managersOfRound, mergePoints, scoreMatchDay } from "../lib/scoring";
 import { scoreBonus, STAGE_LABEL } from "../lib/challenges";
 import { TEAMS_BY_CODE } from "../data/teams";
 import { TeamBadge } from "./TeamBadge";
@@ -12,13 +12,20 @@ export function Standings({
   game,
   fixtures,
   onCaptain,
+  predictRounds = [],
+  predictPicks = [],
 }: {
   game: Game;
   fixtures: Fixture[];
   /** Omit to render captains read-only (league players can't set captains). */
   onCaptain?: (entrantId: string, code: string | null) => void;
+  predictRounds?: PredictRound[];
+  predictPicks?: PredictPick[];
 }) {
-  const bonusByEntrant = scoreBonus(game.challenges ?? [], game.predictions ?? [], fixtures);
+  const bonusByEntrant = mergePoints(
+    scoreBonus(game.challenges ?? [], game.predictions ?? [], fixtures),
+    scoreMatchDay(predictRounds, predictPicks, fixtures)
+  );
   const rows = buildStandings(
     game.entrants,
     game.allocations,

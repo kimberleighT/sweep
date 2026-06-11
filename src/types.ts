@@ -117,6 +117,28 @@ export interface Game {
   predictions?: Prediction[];
 }
 
+/** A host-created Match Day: each player predicts the score of a random game. */
+export interface PredictRound {
+  id: string;
+  /** YYYY-MM-DD of the game day. */
+  gameDate: string;
+  /** ISO timestamp; predictions freeze after this. */
+  locksAt: string;
+  /** points for a correct result, and for an exact score. */
+  pointsResult: number;
+  pointsScore: number;
+}
+
+/** One player's score prediction for their randomly-assigned game. */
+export interface PredictPick {
+  roundId: string;
+  entrantId: string;
+  /** the fixture this player was randomly assigned. */
+  matchId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+}
+
 export interface StandingRow {
   entrant: Entrant;
   points: number;

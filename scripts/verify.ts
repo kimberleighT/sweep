@@ -1,11 +1,18 @@
 // Standalone sanity checks for the pure engines. Run:
 //   node --experimental-strip-types scripts/verify.ts
 import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
-import { buildStandings, DEFAULT_SCORING, managersOfRound } from "../src/lib/scoring.ts";
+import { buildStandings, DEFAULT_SCORING, managersOfRound, scoreMatchDay } from "../src/lib/scoring.ts";
 import { isCorrect, resolveBonusAnswer, scoreBonus } from "../src/lib/challenges.ts";
 import { mergeFixtures } from "../src/lib/api.ts";
 import { TEAMS } from "../src/data/teams.ts";
-import type { BonusChallenge, Entrant, Fixture, Prediction } from "../src/types.ts";
+import type {
+  BonusChallenge,
+  Entrant,
+  Fixture,
+  Prediction,
+  PredictPick,
+  PredictRound,
+} from "../src/types.ts";
 
 let failed = 0;
 function check(name: string, cond: boolean) {
@@ -41,6 +48,17 @@ for (const n of [2, 5, 6, 7, 8, 13]) {
     return Math.max(...perPot) - Math.min(...perPot) <= 1;
   });
   check(`n=${n}: each entrant balanced across pots`, potBalanced);
+
+  // every player should get at least one seeded (pot-1) team while seeds last
+  const pot1Count = TEAMS.filter((t) => t.pot === 1).length;
+  if (n <= pot1Count) {
+    const everyoneSeeded = entrants.every((e) =>
+      allocations
+        .find((a) => a.entrantId === e.id)!
+        .teamCodes.some((c) => TEAMS.find((t) => t.code === c)!.pot === 1)
+    );
+    check(`n=${n}: every player gets a seeded (pot 1) team`, everyoneSeeded);
+  }
 }
 
 check("describeSplit 8 → even", describeSplit(8, 48) === "6 teams each");
@@ -111,6 +129,19 @@ const mgrs = managersOfRound(entrants, allocations, fixtures, DEFAULT_SCORING);
 check("manager: two rounds have a winner (group + final)", mgrs.length === 2);
 check("manager: group round won by BRA owner", mgrs.find((m) => m.stage === "group")!.entrant.id === "e0");
 check("manager: final round won by BRA owner", mgrs.find((m) => m.stage === "final")!.entrant.id === "e0");
+
+// ---- match day predictions (exact=6, result=3, miss=0) ----
+const mdRound: PredictRound = { id: "r1", gameDate: "2026-06-11", locksAt: "2026-06-01T00:00:00Z", pointsResult: 3, pointsScore: 6 };
+const mdPicks: PredictPick[] = [
+  { roundId: "r1", entrantId: "e0", matchId: "1", homeScore: 3, awayScore: 1 }, // exact (BRA 3-1 GER) → 6
+  { roundId: "r1", entrantId: "e1", matchId: "1", homeScore: 2, awayScore: 0 }, // home win, not exact → 3
+  { roundId: "r1", entrantId: "e2", matchId: "2", homeScore: 1, awayScore: 0 }, // ARG-ESP was 2-2 draw → 0
+  { roundId: "r1", entrantId: "e3", matchId: "3", homeScore: null, awayScore: null }, // no pick → 0
+];
+const md = scoreMatchDay([mdRound], mdPicks, fixtures);
+check("matchday: exact score = 6", md.e0 === 6);
+check("matchday: correct result = 3", md.e1 === 3);
+check("matchday: wrong result = 0", (md.e2 ?? 0) === 0);
 
 const challenges: BonusChallenge[] = [
   mk("g", "total_goals", "group"), // answer "8"

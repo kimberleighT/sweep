@@ -4,18 +4,22 @@ import type { Allocation } from "../types";
 import { TEAMS, TEAMS_BY_CODE } from "../data/teams";
 import { buildScheduleFixtures } from "../data/worldcup2026";
 import { loadTeams } from "../lib/storage";
-import { buildStandings } from "../lib/scoring";
+import { buildStandings, mergePoints, scoreMatchDay } from "../lib/scoring";
 import { scoreBonus } from "../lib/challenges";
 import { fetchSeasonFixtures, mergeFixtures } from "../lib/api";
 import {
+  assignMatchday,
   createChallenge,
+  createPredictRound,
   deleteChallenge,
   deleteLeague,
+  deletePredictRound,
   getActivity,
   getLeagueState,
   setAllocations,
   setCaptain,
   setMatches,
+  submitPredict,
   submitPrediction,
   subscribeLeague,
   type ActivityItem,
@@ -26,15 +30,17 @@ import { Draw } from "./Draw";
 import { Standings } from "./Standings";
 import { Fixtures } from "./Fixtures";
 import { LeagueBonus } from "./LeagueBonus";
+import { MatchDay } from "./MatchDay";
 import { PowerRanking } from "./PowerRanking";
 import { DailyDigest } from "./DailyDigest";
 import { NextUp } from "./Countdown";
 
-type Tab = "table" | "fixtures" | "bonus" | "power";
+type Tab = "table" | "fixtures" | "bonus" | "matchday" | "power";
 const TAB_LABEL: Record<Tab, string> = {
   table: "League",
   fixtures: "Fixtures",
   bonus: "Bonus",
+  matchday: "Match Day",
   power: "Power",
 };
 
@@ -104,14 +110,17 @@ export function LeagueRoom({
   useEffect(() => {
     if (!state) return;
     const g = state.game;
-    const bonus = scoreBonus(g.challenges ?? [], g.predictions ?? [], state.fixtures);
+    const pts = mergePoints(
+      scoreBonus(g.challenges ?? [], g.predictions ?? [], state.fixtures),
+      scoreMatchDay(state.predictRounds, state.predictPicks, state.fixtures)
+    );
     const rows = buildStandings(
       g.entrants,
       g.allocations,
       state.fixtures,
       g.scoring,
       g.captains ?? {},
-      bonus
+      pts
     );
     const leaderId = rows[0]?.entrant.id ?? null;
     if (
@@ -291,7 +300,7 @@ export function LeagueRoom({
       <DailyDigest game={game} fixtures={fixtures} />
 
       <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-black/20 p-1">
-        {(["table", "fixtures", "bonus", "power"] as Tab[]).map((t) => (
+        {(["table", "fixtures", "bonus", "matchday", "power"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -308,6 +317,8 @@ export function LeagueRoom({
         <Standings
           game={game}
           fixtures={fixtures}
+          predictRounds={state.predictRounds}
+          predictPicks={state.predictPicks}
           onCaptain={
             isHost
               ? (entrantId, code) =>
@@ -381,6 +392,21 @@ export function LeagueRoom({
           onSubmitPrediction={(id, answer, isJoker) =>
             void act(() => submitPrediction(session.token, id, answer, isJoker))
           }
+        />
+      )}
+
+      {tab === "matchday" && (
+        <MatchDay
+          game={game}
+          fixtures={fixtures}
+          isHost={isHost}
+          viewerEntrantId={viewer.entrantId}
+          predictRounds={state.predictRounds}
+          predictPicks={state.predictPicks}
+          onCreate={(i) => void act(() => createPredictRound(session.token, i))}
+          onDelete={(id) => void act(() => deletePredictRound(session.token, id))}
+          onAssign={(id) => void act(() => assignMatchday(session.token, id))}
+          onSubmit={(id, h, a) => void act(() => submitPredict(session.token, id, h, a))}
         />
       )}
 
