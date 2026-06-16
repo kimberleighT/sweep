@@ -2,7 +2,9 @@ import { useState } from "react";
 import { loadGame } from "./lib/storage";
 import {
   clearSession,
+  loadLastLeague,
   loadSession,
+  saveLastLeague,
   saveSession,
   type LeagueSession,
 } from "./lib/session";
@@ -23,6 +25,7 @@ export default function App() {
     if (!session)
       return (
         <LeagueLobby
+          lastLeague={loadLastLeague()}
           onAuthed={(r: AuthResult) => {
             const s: LeagueSession = {
               joinCode: r.joinCode,
@@ -31,6 +34,12 @@ export default function App() {
               isHost: r.isHost,
             };
             saveSession(s);
+            // Remember where they were so they can get back in after logging
+            // out. Players only — a host must return via "Host login" or the
+            // Welcome-back resume would log them in as a plain player and strip
+            // their host powers (the host PIN doubles as their player PIN).
+            if (r.entrantId && !r.isHost)
+              saveLastLeague({ joinCode: r.joinCode, displayName: r.displayName });
             setSession(s);
           }}
           onBack={() => setMode("choose")}

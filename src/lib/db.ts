@@ -240,6 +240,8 @@ export interface AuthResult {
   entrantId: string | null;
   isHost: boolean;
   isNew: boolean;
+  /** The name this player is known by, so we can remember it for re-entry. */
+  displayName: string | null;
 }
 
 export async function createLeague(input: {
@@ -270,6 +272,7 @@ export async function createLeague(input: {
     entrantId: data.entrant_id, // the host plays too
     isHost: true,
     isNew: true,
+    displayName: input.hostName.trim() || null,
   };
 }
 
@@ -285,6 +288,7 @@ export async function hostLogin(joinCode: string, hostPin: string): Promise<Auth
     entrantId: null,
     isHost: true,
     isNew: false,
+    displayName: null, // host-only login isn't tied to a player name
   };
 }
 
@@ -311,6 +315,7 @@ export async function joinLeague(
     entrantId: data.entrant_id,
     isHost: false,
     isNew: data.is_new,
+    displayName: displayName.trim() || null,
   };
 }
 
