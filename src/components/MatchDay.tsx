@@ -16,6 +16,16 @@ const fmtDay = (iso: string) => {
 
 const isLocked = (round: PredictRound) => Date.now() >= Date.parse(round.locksAt);
 
+const pad = (n: number) => String(n).padStart(2, "0");
+const toLocalInput = (d: Date) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** A sensible future default lock: the game day at 11:00, or 2h from now if that's past. */
+const futureLockFor = (date: string) => {
+  if (!date) return "";
+  const at11 = new Date(`${date}T11:00`);
+  return toLocalInput(at11.getTime() > Date.now() ? at11 : new Date(Date.now() + 2 * 3600 * 1000));
+};
+
 /** Points a finished pick earned (or null if its game isn't finished yet). */
 function pickPoints(pick: PredictPick, round: PredictRound, fixtures: Fixture[]): number | null {
   const m = fixtures.find((f) => f.id === pick.matchId);
@@ -141,13 +151,13 @@ function NewMatchDay({
   onCancel: () => void;
 }) {
   const [gameDate, setGameDate] = useState(dates[0] ?? "");
-  const [locksAt, setLocksAt] = useState(dates[0] ? `${dates[0]}T12:00` : "");
+  const [locksAt, setLocksAt] = useState(futureLockFor(dates[0] ?? ""));
   const [pointsResult, setPointsResult] = useState(3);
   const [pointsScore, setPointsScore] = useState(6);
 
   function pickDate(d: string) {
     setGameDate(d);
-    setLocksAt(`${d}T12:00`);
+    setLocksAt(futureLockFor(d));
   }
 
   return (
