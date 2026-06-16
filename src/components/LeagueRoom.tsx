@@ -406,7 +406,13 @@ export function LeagueRoom({
           onCreate={(i) => void act(() => createPredictRound(session.token, i))}
           onDelete={(id) => void act(() => deletePredictRound(session.token, id))}
           onAssign={(id) => void act(() => assignMatchday(session.token, id))}
-          onSubmit={(id, h, a) => void act(() => submitPredict(session.token, id, h, a))}
+          onSubmit={(id, h, a) =>
+            // Return the promise so the card can show Saving…/Saved ✓/error
+            // inline; refetch authoritative state on success.
+            submitPredict(session.token, id, h, a).then(() => {
+              void refresh();
+            })
+          }
         />
       )}
 

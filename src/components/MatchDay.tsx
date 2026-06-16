@@ -74,7 +74,7 @@ export function MatchDay({
   }) => void;
   onDelete: (roundId: string) => void;
   onAssign: (roundId: string) => void;
-  onSubmit: (roundId: string, homeScore: number, awayScore: number) => void;
+  onSubmit: (roundId: string, homeScore: number, awayScore: number) => Promise<void>;
 }) {
   const [adding, setAdding] = useState(false);
   const fixtureDates = useMemo(
@@ -248,7 +248,7 @@ function RoundCard({
   picks: PredictPick[];
   onDelete: () => void;
   onAssign: () => void;
-  onSubmit: (homeScore: number, awayScore: number) => void;
+  onSubmit: (homeScore: number, awayScore: number) => Promise<void>;
 }) {
   const locked = isLocked(round);
   const own = viewerEntrantId
@@ -257,7 +257,23 @@ function RoundCard({
   const ownMatch = own ? fixtures.find((f) => f.id === own.matchId) : undefined;
   const [h, setH] = useState(own?.homeScore?.toString() ?? "");
   const [a, setA] = useState(own?.awayScore?.toString() ?? "");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const nameById = (id: string) => game.entrants.find((e) => e.id === id)?.name ?? "—";
+
+  async function handleSave() {
+    if (h === "" || a === "") return;
+    setSaveState("saving");
+    setSaveErr(null);
+    try {
+      await onSubmit(Number(h), Number(a));
+      setSaveState("saved");
+      setTimeout(() => setSaveState("idle"), 2000);
+    } catch (e) {
+      setSaveState("error");
+      setSaveErr((e as Error).message);
+    }
+  }
 
   const lockLabel = new Date(round.locksAt).toLocaleString(undefined, {
     weekday: "short",
@@ -302,30 +318,49 @@ function RoundCard({
               <TeamRow code={ownMatch.awayCode} />
             </div>
             {!locked ? (
-              <div className="flex items-center justify-center gap-2">
-                <input
-                  type="number"
-                  min={0}
-                  value={h}
-                  onChange={(e) => setH(e.target.value)}
-                  className="w-14 rounded-md border border-white/15 bg-black/30 px-2 py-1 text-center text-sm outline-none focus:border-gold"
-                />
-                <span className="text-white/30">–</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={a}
-                  onChange={(e) => setA(e.target.value)}
-                  className="w-14 rounded-md border border-white/15 bg-black/30 px-2 py-1 text-center text-sm outline-none focus:border-gold"
-                />
-                <button
-                  onClick={() => h !== "" && a !== "" && onSubmit(Number(h), Number(a))}
-                  disabled={h === "" || a === ""}
-                  className="rounded-md bg-gold px-3 py-1 text-xs font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-30"
-                >
-                  Save
-                </button>
-              </div>
+              <>
+                <div className="flex items-center justify-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    value={h}
+                    onChange={(e) => {
+                      setH(e.target.value);
+                      setSaveState("idle");
+                    }}
+                    className="w-14 rounded-md border border-white/15 bg-black/30 px-2 py-1 text-center text-sm outline-none focus:border-gold"
+                  />
+                  <span className="text-white/30">–</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={a}
+                    onChange={(e) => {
+                      setA(e.target.value);
+                      setSaveState("idle");
+                    }}
+                    className="w-14 rounded-md border border-white/15 bg-black/30 px-2 py-1 text-center text-sm outline-none focus:border-gold"
+                  />
+                  <button
+                    onClick={() => void handleSave()}
+                    disabled={h === "" || a === "" || saveState === "saving"}
+                    className={`rounded-md px-3 py-1 text-xs font-black uppercase tracking-wide text-black transition disabled:opacity-30 ${
+                      saveState === "saved"
+                        ? "bg-emerald-500"
+                        : "bg-gold hover:brightness-110"
+                    }`}
+                  >
+                    {saveState === "saving"
+                      ? "Saving…"
+                      : saveState === "saved"
+                        ? "Saved ✓"
+                        : "Save"}
+                  </button>
+                </div>
+                {saveErr && (
+                  <p className="text-center text-xs text-red-300">{saveErr}</p>
+                )}
+              </>
             ) : (
               <p className="text-center text-sm text-white/70">
                 Your call: <span className="font-bold">{own.homeScore ?? "–"}–{own.awayScore ?? "–"}</span>
