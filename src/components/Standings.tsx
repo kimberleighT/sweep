@@ -161,6 +161,14 @@ export function Standings({
                           🃏+{r.predictionPoints}
                         </span>
                       )}
+                      {r.shortTeamBonus > 0 && (
+                        <span
+                          className="ml-1 text-xs text-sky-300"
+                          title={`Fewer-teams comp: +${r.shortTeamBonus} (extra point per win & draw)`}
+                        >
+                          ⚖️+{r.shortTeamBonus}
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-center text-white/70">{r.alive}</td>
                     <td className="px-2 py-2 text-center text-white/70">{r.played}</td>
@@ -214,6 +222,13 @@ export function Standings({
                         {r.predictionPoints > 0 && (
                           <p className="mt-2 text-xs text-emerald-400">
                             🃏 Bonus predictions: +{r.predictionPoints} pts
+                          </p>
+                        )}
+                        {r.shortTeamBonus > 0 && (
+                          <p className="mt-2 text-xs text-sky-300">
+                            ⚖️ Fewer-teams comp: +{r.shortTeamBonus} pts (extra
+                            point per win &amp; draw — {r.teams.length} teams vs the
+                            top entry's count)
                           </p>
                         )}
                       </td>

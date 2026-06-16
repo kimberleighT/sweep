@@ -48,6 +48,12 @@ export interface ScoringConfig {
   /** progression bonus awarded to a team that REACHES this stage. */
   reach: Record<Exclude<Stage, "group">, number>;
   winnerBonus: number;
+  /**
+   * Fairness comp for an uneven draw: an entrant with FEWER teams than the
+   * league's top team count gets this many extra points per win and per draw
+   * their teams earn. Defaults to 1 when absent (so existing leagues get it).
+   */
+  shortTeamBonus?: number;
 }
 
 export interface PrizeConfig {
@@ -150,6 +156,8 @@ export interface StandingRow {
   bonus: number;
   /** points won from correct bonus-challenge predictions (incl. jokers). */
   predictionPoints: number;
+  /** fairness comp for holding fewer teams than the league's top count. */
+  shortTeamBonus: number;
   teams: string[];
   /** the entrant's captain team code, if set */
   captain?: string;

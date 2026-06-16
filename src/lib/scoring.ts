@@ -18,6 +18,7 @@ export const DEFAULT_SCORING: ScoringConfig = {
   perGoal: 1,
   reach: { r32: 2, r16: 5, qf: 10, sf: 15, final: 25 },
   winnerBonus: 40,
+  shortTeamBonus: 1,
 };
 
 const KNOCKOUT_STAGES: Exclude<Stage, "group">[] = [
@@ -144,6 +145,14 @@ export function buildStandings(
   const teamTotals = scoreTeams(fixtures, scoring);
   const allocByEntrant = new Map(allocations.map((a) => [a.entrantId, a.teamCodes]));
 
+  // Fairness comp for an uneven draw: anyone holding fewer teams than the
+  // league's top count earns extra points per win and per draw.
+  const comp = scoring.shortTeamBonus ?? 1;
+  const maxTeams = entrants.reduce(
+    (m, e) => Math.max(m, (allocByEntrant.get(e.id) ?? []).length),
+    0
+  );
+
   const rows: StandingRow[] = entrants.map((entrant) => {
     const teams = allocByEntrant.get(entrant.id) ?? [];
     const captain = captains[entrant.id];
@@ -166,12 +175,15 @@ export function buildStandings(
       if (!t.eliminated) alive++;
     }
     const predictionPoints = predictionPointsByEntrant[entrant.id] ?? 0;
+    // short-handed entrants get `comp` extra points for each win and each draw
+    const shortTeamBonus =
+      teams.length < maxTeams ? (agg.won + agg.drawn) * comp : 0;
     return {
       entrant,
       teams,
       captain,
       alive,
-      points: agg.points + predictionPoints,
+      points: agg.points + predictionPoints + shortTeamBonus,
       played: agg.played,
       won: agg.won,
       drawn: agg.drawn,
@@ -179,6 +191,7 @@ export function buildStandings(
       goalsFor: agg.goalsFor,
       bonus: agg.bonus,
       predictionPoints,
+      shortTeamBonus,
     };
   });
 
