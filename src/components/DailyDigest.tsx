@@ -29,14 +29,18 @@ function FixtureLine({ of }: { of: OwnedFixture }) {
 }
 
 export function DailyDigest({ game, fixtures }: { game: Game; fixtures: Fixture[] }) {
-  const today = new Date().toISOString().slice(0, 10);
+  // Local calendar date (not UTC) so "today's action" is right in BST etc.
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const digest = buildDailyDigest(
     fixtures,
     game.allocations,
     game.entrants,
     TEAMS_BY_CODE,
     game.scoring,
-    today
+    today,
+    game.captains ?? {}
   );
 
   const hasAnything =

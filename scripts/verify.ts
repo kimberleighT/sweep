@@ -241,8 +241,35 @@ const digest = buildDailyDigest(
   DEFAULT_SCORING,
   "2026-06-27"
 );
-const riot = digest.headlines.find((h) => h.icon === "🔥");
-check("headline: away win is oriented to the winner (Austria 3–1)", !!riot && riot.text.includes("Austria ran riot 3–1 v Algeria"));
+const bigWin = digest.headlines.find((h) => h.text.includes("Austria"));
+check("headline: away win is oriented to the winner (Austria 3–1 v Algeria)", !!bigWin && bigWin.text.includes("3–1") && bigWin.text.includes("Austria") && bigWin.text.indexOf("Austria") < bigWin.text.indexOf("Algeria"));
+
+// ---- enriched headlines: league race + upsets + survival ----
+// Three entrants, a tight top two and a knockout giant-killing on the latest day.
+const hlEnt = [
+  { id: "a", name: "Ana" },
+  { id: "b", name: "Ben" },
+  { id: "c", name: "Cat" },
+];
+const hlAlloc = [
+  { entrantId: "a", teamCodes: ["BRA", "MAR"] }, // MAR (pot 2) will dump BRA-less... see below
+  { entrantId: "b", teamCodes: ["ARG"] },
+  { entrantId: "c", teamCodes: ["JPN"] },
+];
+const richFx: Fixture[] = [
+  // group day: Brazil batter someone for a clear leader + a goal haul
+  { id: "g1", stage: "group", group: "C", kickoff: "2026-06-20T00:00:00", homeCode: "BRA", awayCode: "HAI", homeScore: 4, awayScore: 0, status: "finished" },
+  { id: "g2", stage: "group", group: "J", kickoff: "2026-06-20T00:00:00", homeCode: "ARG", awayCode: "ALG", homeScore: 2, awayScore: 1, status: "finished" },
+  // knockout day: Morocco (pot 2) knocks Argentina (pot 1) OUT — upset + elimination
+  { id: "k1", stage: "r32", group: null, kickoff: "2026-06-28T00:00:00", homeCode: "MAR", awayCode: "ARG", homeScore: 1, awayScore: 0, status: "finished" },
+  { id: "k2", stage: "r32", group: null, kickoff: "2026-07-01T00:00:00", homeCode: "JPN", awayCode: "BRA", homeScore: null, awayScore: null, status: "scheduled" },
+];
+const richDigest = buildDailyDigest(richFx, hlAlloc, hlEnt, TEAMS_BY_CODE, DEFAULT_SCORING, "2026-06-28");
+check("headline: a league-leader line is always present", richDigest.headlines.some((h) => h.icon === "👑"));
+check("headline: knockout giant-killing surfaces", richDigest.headlines.some((h) => h.text.includes("dumped") && h.text.includes("OUT")));
+check("headline: latest day drives the feed (28 Jun, not 20 Jun)", richDigest.date === "2026-06-28");
+check("headline: feed is capped at 5", richDigest.headlines.length <= 5);
+check("headline: no duplicate headline text", new Set(richDigest.headlines.map((h) => h.text)).size === richDigest.headlines.length);
 
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);
