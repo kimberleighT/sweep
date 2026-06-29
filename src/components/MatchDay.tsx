@@ -19,11 +19,11 @@ const isLocked = (round: PredictRound) => Date.now() >= Date.parse(round.locksAt
 const pad = (n: number) => String(n).padStart(2, "0");
 const toLocalInput = (d: Date) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-/** A sensible future default lock: the game day at 11:00, or 2h from now if that's past. */
+/** A sensible future default lock: the game day at 14:00, or 2h from now if that's past. */
 const futureLockFor = (date: string) => {
   if (!date) return "";
-  const at11 = new Date(`${date}T11:00`);
-  return toLocalInput(at11.getTime() > Date.now() ? at11 : new Date(Date.now() + 2 * 3600 * 1000));
+  const at14 = new Date(`${date}T14:00`);
+  return toLocalInput(at14.getTime() > Date.now() ? at14 : new Date(Date.now() + 2 * 3600 * 1000));
 };
 
 /** Points a finished pick earned (or null if its game isn't finished yet). */
