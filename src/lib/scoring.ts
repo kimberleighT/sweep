@@ -10,7 +10,7 @@ import type {
   Stage,
   StandingRow,
 } from "../types";
-import { scoreBonus, STAGE_ORDER } from "./challenges.ts";
+import { scoreBonus, STAGE_LABEL, STAGE_ORDER } from "./challenges.ts";
 
 export const DEFAULT_SCORING: ScoringConfig = {
   win: 3,
@@ -126,6 +126,23 @@ export function scoreTeams(
         t.bonus += b;
         t.points += b;
       }
+    }
+  }
+
+  // Group-stage exits: a knockout loss already flags `eliminated`, but teams
+  // that simply didn't qualify never lose a knockout game. Once the R32 is
+  // drawn, the 32 teams in it are exactly the survivors — anyone owned but not
+  // among them is out (so "teams alive" drops the moment the bracket is built).
+  const r32Teams = new Set<string>();
+  for (const f of fixtures) {
+    if (f.stage === "r32") {
+      r32Teams.add(f.homeCode);
+      r32Teams.add(f.awayCode);
+    }
+  }
+  if (r32Teams.size > 0) {
+    for (const [code, t] of totals) {
+      if (!r32Teams.has(code)) t.eliminated = true;
     }
   }
 
@@ -291,4 +308,179 @@ export function managersOfRound(
     if (top && top.points > 0) out.push({ stage, entrant: top.entrant, points: top.points });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Per-entrant points breakdown — "where did these points come from?"
+ * Reconciles EXACTLY to the entrant's row in buildStandings.
+ * ------------------------------------------------------------------ */
+
+/** One scoring line, e.g. "Win" +3, "2 goals" +2, "Reached Round of 16" +5. */
+export interface PointLine {
+  label: string;
+  points: number;
+}
+
+/** A single finished game and what the owned team earned from it (pre-captain). */
+export interface GameContribution {
+  fixtureId: string;
+  stage: Stage;
+  kickoff: string;
+  teamCode: string;
+  oppCode: string;
+  teamScore: number;
+  oppScore: number;
+  result: "W" | "D" | "L";
+  /** points the team earned in this game, before any captain ×2 */
+  basePoints: number;
+  lines: PointLine[];
+}
+
+/** Everything one owned team contributed (matches + progression bonuses). */
+export interface TeamContribution {
+  teamCode: string;
+  captain: boolean;
+  eliminated: boolean;
+  games: GameContribution[];
+  /** progression / champion bonuses, before any captain ×2 */
+  bonusLines: PointLine[];
+  /** matches + bonuses, before captain ×2 */
+  baseTotal: number;
+  /** baseTotal, doubled if this team is the captain */
+  total: number;
+}
+
+export interface EntrantBreakdown {
+  teams: TeamContribution[];
+  /** sum of every team's `total` (incl. captain doubling) */
+  teamsTotal: number;
+  predictionPoints: number;
+  shortTeamBonus: number;
+  /** grand total — equals the entrant's points in buildStandings */
+  total: number;
+}
+
+/**
+ * Explain exactly how an entrant's league points were earned: per owned team,
+ * the games that scored and the points each gave, plus progression bonuses,
+ * captain doubling, prediction points and the fewer-teams comp. The grand total
+ * is identical to the entrant's `points` from buildStandings, by construction.
+ */
+export function explainEntrant(
+  entrantId: string,
+  entrants: Entrant[],
+  allocations: Allocation[],
+  fixtures: Fixture[],
+  scoring: ScoringConfig,
+  captains: Record<string, string> = {},
+  predictionPointsByEntrant: Record<string, number> = {}
+): EntrantBreakdown {
+  const teamCodesOf = (id: string) =>
+    allocations.find((a) => a.entrantId === id)?.teamCodes ?? [];
+  const teamCodes = teamCodesOf(entrantId);
+  const captainCode = captains[entrantId];
+
+  // Same fairness-comp basis as buildStandings.
+  const comp = scoring.shortTeamBonus ?? 1;
+  const maxTeams = entrants.reduce((m, e) => Math.max(m, teamCodesOf(e.id).length), 0);
+
+  // Which teams are still in it (mirrors scoreTeams' elimination logic).
+  const elimByCode = new Map<string, boolean>();
+  for (const [code, t] of scoreTeams(fixtures, scoring)) elimByCode.set(code, t.eliminated);
+
+  const teams: TeamContribution[] = teamCodes.map((code) => {
+    const isCap = captainCode === code;
+    const stagesSeen = new Set<Stage>();
+    const games: GameContribution[] = [];
+
+    for (const f of fixtures) {
+      const isHome = f.homeCode === code;
+      const isAway = f.awayCode === code;
+      if (!isHome && !isAway) continue;
+      stagesSeen.add(f.stage);
+      if (f.status !== "finished" || f.homeScore === null || f.awayScore === null) continue;
+
+      const teamScore = isHome ? f.homeScore : f.awayScore;
+      const oppScore = isHome ? f.awayScore : f.homeScore;
+      const oppCode = isHome ? f.awayCode : f.homeCode;
+      const lines: PointLine[] = [];
+      let base = 0;
+      if (teamScore > 0) {
+        const p = teamScore * scoring.perGoal;
+        lines.push({ label: `${teamScore} goal${teamScore === 1 ? "" : "s"}`, points: p });
+        base += p;
+      }
+      let result: "W" | "D" | "L";
+      if (teamScore > oppScore) {
+        result = "W";
+        lines.push({ label: "Win", points: scoring.win });
+        base += scoring.win;
+      } else if (teamScore === oppScore) {
+        result = "D";
+        lines.push({ label: "Draw", points: scoring.draw });
+        base += scoring.draw;
+      } else {
+        result = "L";
+      }
+      games.push({
+        fixtureId: f.id,
+        stage: f.stage,
+        kickoff: f.kickoff,
+        teamCode: code,
+        oppCode,
+        teamScore,
+        oppScore,
+        result,
+        basePoints: base,
+        lines,
+      });
+    }
+
+    const bonusLines: PointLine[] = [];
+    for (const st of KNOCKOUT_STAGES) {
+      if (stagesSeen.has(st)) bonusLines.push({ label: `Reached ${STAGE_LABEL[st]}`, points: scoring.reach[st] });
+    }
+    const wonFinal = fixtures.some(
+      (f) =>
+        f.stage === "final" &&
+        f.status === "finished" &&
+        f.homeScore !== null &&
+        f.awayScore !== null &&
+        f.homeScore !== f.awayScore &&
+        ((f.homeScore > f.awayScore && f.homeCode === code) ||
+          (f.awayScore > f.homeScore && f.awayCode === code))
+    );
+    if (wonFinal) bonusLines.push({ label: "Won the World Cup", points: scoring.winnerBonus });
+
+    const baseTotal =
+      games.reduce((s, g) => s + g.basePoints, 0) +
+      bonusLines.reduce((s, b) => s + b.points, 0);
+
+    return {
+      teamCode: code,
+      captain: isCap,
+      eliminated: elimByCode.get(code) ?? false,
+      games,
+      bonusLines,
+      baseTotal,
+      total: isCap ? baseTotal * 2 : baseTotal,
+    };
+  });
+
+  // Fewer-teams comp: extra `comp` per win & per draw across all owned teams.
+  const wonDrawn = teams.reduce(
+    (s, t) => s + t.games.filter((g) => g.result === "W" || g.result === "D").length,
+    0
+  );
+  const shortTeamBonus = teamCodes.length < maxTeams ? wonDrawn * comp : 0;
+  const teamsTotal = teams.reduce((s, t) => s + t.total, 0);
+  const predictionPoints = predictionPointsByEntrant[entrantId] ?? 0;
+
+  return {
+    teams,
+    teamsTotal,
+    predictionPoints,
+    shortTeamBonus,
+    total: teamsTotal + predictionPoints + shortTeamBonus,
+  };
 }

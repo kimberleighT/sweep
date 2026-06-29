@@ -1,7 +1,7 @@
 // Standalone sanity checks for the pure engines. Run:
 //   node --experimental-strip-types scripts/verify.ts
 import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
-import { buildStandings, DEFAULT_SCORING, managersOfRound, scoreMatchDay } from "../src/lib/scoring.ts";
+import { buildStandings, DEFAULT_SCORING, explainEntrant, managersOfRound, scoreMatchDay } from "../src/lib/scoring.ts";
 import { isCorrect, resolveBonusAnswer, scoreBonus } from "../src/lib/challenges.ts";
 import { mergeFixtures } from "../src/lib/api.ts";
 import {
@@ -270,6 +270,37 @@ check("headline: knockout giant-killing surfaces", richDigest.headlines.some((h)
 check("headline: latest day drives the feed (28 Jun, not 20 Jun)", richDigest.date === "2026-06-28");
 check("headline: feed is capped at 5", richDigest.headlines.length <= 5);
 check("headline: no duplicate headline text", new Set(richDigest.headlines.map((h) => h.text)).size === richDigest.headlines.length);
+
+// ---- teams-alive drops once the R32 is drawn (group-stage exits) ----
+const aliveEnt = [{ id: "x", name: "X" }];
+const aliveAlloc = [{ entrantId: "x", teamCodes: ["BRA", "HAI"] }]; // BRA wins grp C, HAI bottom
+const preR32 = buildStandings(aliveEnt, aliveAlloc, groupFx, DEFAULT_SCORING);
+check("alive: both teams alive during the group stage", preR32[0]!.alive === 2);
+const postR32 = buildStandings(aliveEnt, aliveAlloc, [...groupFx, ...r32only], DEFAULT_SCORING);
+check("alive: a group-stage exit drops out once the R32 is drawn", postR32[0]!.alive === 1);
+
+// ---- points breakdown reconciles EXACTLY to the table total ----
+const bd0 = explainEntrant("e0", entrants, allocations, fixtures, DEFAULT_SCORING, {}, bonus);
+check("breakdown: reconciles to e0's table points (90)", bd0.total === 90);
+check("breakdown: lists the games that scored", bd0.teams.some((t) => t.games.length > 0));
+
+// every entrant in a mixed (group + knockout) league must reconcile
+const reconRows = buildStandings(hlEnt, hlAlloc, richFx, DEFAULT_SCORING, {}, {});
+const reconOK = reconRows.every(
+  (row) =>
+    explainEntrant(row.entrant.id, hlEnt, hlAlloc, richFx, DEFAULT_SCORING, {}, {}).total ===
+    row.points
+);
+check("breakdown: every entrant reconciles to their table points", reconOK);
+
+// captain doubling reconciles too
+const capCaptains = { a: "BRA" };
+const capRow = buildStandings(hlEnt, hlAlloc, richFx, DEFAULT_SCORING, capCaptains, {}).find(
+  (r) => r.entrant.id === "a"
+)!;
+const capBd = explainEntrant("a", hlEnt, hlAlloc, richFx, DEFAULT_SCORING, capCaptains, {});
+check("breakdown: captain ×2 reconciles", capBd.total === capRow.points);
+check("breakdown: captain team flagged + doubled", capBd.teams.some((t) => t.captain && t.total === t.baseTotal * 2));
 
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);

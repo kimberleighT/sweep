@@ -1,8 +1,15 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { Fixture, Game, PredictPick, PredictRound } from "../types";
-import { buildStandings, managersOfRound, mergePoints, scoreMatchDay } from "../lib/scoring";
+import {
+  buildStandings,
+  explainEntrant,
+  managersOfRound,
+  mergePoints,
+  scoreMatchDay,
+} from "../lib/scoring";
 import { scoreBonus, STAGE_LABEL } from "../lib/challenges";
+import type { Stage } from "../types";
 import { TEAMS_BY_CODE } from "../data/teams";
 import { TeamBadge } from "./TeamBadge";
 import { AnimatedNumber } from "./AnimatedNumber";
@@ -219,18 +226,17 @@ export function Standings({
                             );
                           })}
                         </div>
-                        {r.predictionPoints > 0 && (
-                          <p className="mt-2 text-xs text-emerald-400">
-                            🃏 Bonus predictions: +{r.predictionPoints} pts
-                          </p>
-                        )}
-                        {r.shortTeamBonus > 0 && (
-                          <p className="mt-2 text-xs text-sky-300">
-                            ⚖️ Fewer-teams comp: +{r.shortTeamBonus} pts (extra
-                            point per win &amp; draw — {r.teams.length} teams vs the
-                            top entry's count)
-                          </p>
-                        )}
+                        <PointsBreakdown
+                          breakdown={explainEntrant(
+                            r.entrant.id,
+                            game.entrants,
+                            game.allocations,
+                            fixtures,
+                            game.scoring,
+                            game.captains ?? {},
+                            bonusByEntrant
+                          )}
+                        />
                       </td>
                     </tr>
                   )}
@@ -275,6 +281,124 @@ export function Standings({
           No results yet — load the 2026 schedule or add results to get the table moving.
         </p>
       )}
+    </div>
+  );
+}
+
+const STAGE_TAG: Record<Stage, string> = {
+  group: "GRP",
+  r32: "R32",
+  r16: "R16",
+  qf: "QF",
+  sf: "SF",
+  final: "F",
+};
+const RESULT_CLASS: Record<"W" | "D" | "L", string> = {
+  W: "text-emerald-400",
+  D: "text-amber-300",
+  L: "text-red-400",
+};
+
+/** "Where the points came from" — per team, the games (and bonuses) that scored. */
+function PointsBreakdown({
+  breakdown,
+}: {
+  breakdown: ReturnType<typeof explainEntrant>;
+}) {
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-xs font-bold uppercase tracking-wider text-gold/70">
+        Where the points came from
+      </p>
+
+      {breakdown.teams.map((t) => {
+        const team = TEAMS_BY_CODE[t.teamCode];
+        const scored = t.games.length > 0 || t.bonusLines.length > 0;
+        return (
+          <div key={t.teamCode} className="rounded-lg bg-white/5 px-2.5 py-2">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-sm font-semibold">
+                {team && <TeamBadge team={team} size="sm" />}
+                {t.captain && (
+                  <span className="text-gold" title="Captain — scores 2×">©</span>
+                )}
+                {t.eliminated && (
+                  <span className="text-[10px] uppercase tracking-wide text-red-400/80">
+                    out
+                  </span>
+                )}
+              </span>
+              <span className="font-black text-gold">{t.total}</span>
+            </div>
+
+            {scored ? (
+              <ul className="mt-1 space-y-0.5">
+                {t.games.map((g) => (
+                  <li
+                    key={g.fixtureId}
+                    className="flex items-center justify-between gap-2 text-xs text-white/65"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <span className="w-7 shrink-0 text-[10px] font-bold text-white/35">
+                        {STAGE_TAG[g.stage]}
+                      </span>
+                      <span className={`font-bold ${RESULT_CLASS[g.result]}`}>
+                        {g.result}
+                      </span>
+                      <span className="tabular-nums">
+                        {g.teamScore}–{g.oppScore}
+                      </span>
+                      <span className="truncate text-white/45">
+                        v {TEAMS_BY_CODE[g.oppCode]?.name ?? g.oppCode}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-white/80">+{g.basePoints}</span>
+                  </li>
+                ))}
+                {t.bonusLines.map((b) => (
+                  <li
+                    key={b.label}
+                    className="flex items-center justify-between gap-2 text-xs text-sky-300/90"
+                  >
+                    <span className="truncate">🎖️ {b.label}</span>
+                    <span className="shrink-0">+{b.points}</span>
+                  </li>
+                ))}
+                {t.captain && t.baseTotal > 0 && (
+                  <li className="text-right text-[10px] text-gold/70">
+                    captain — {t.baseTotal} × 2 = {t.total}
+                  </li>
+                )}
+              </ul>
+            ) : (
+              <p className="mt-1 text-xs text-white/30">No points yet.</p>
+            )}
+          </div>
+        );
+      })}
+
+      <div className="space-y-0.5 border-t border-white/10 pt-2 text-xs">
+        <Line label="Match & bonus points" value={breakdown.teamsTotal} />
+        {breakdown.predictionPoints > 0 && (
+          <Line label="🃏 Bonus predictions" value={breakdown.predictionPoints} muted />
+        )}
+        {breakdown.shortTeamBonus > 0 && (
+          <Line label="⚖️ Fewer-teams comp" value={breakdown.shortTeamBonus} muted />
+        )}
+        <div className="flex items-center justify-between pt-0.5 font-black text-gold">
+          <span>Total</span>
+          <span>{breakdown.total}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Line({ label, value, muted }: { label: string; value: number; muted?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between ${muted ? "text-white/55" : "text-white/70"}`}>
+      <span>{label}</span>
+      <span>+{value}</span>
     </div>
   );
 }
