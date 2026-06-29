@@ -86,14 +86,21 @@ export function buildDailyDigest(
     );
     const big = byMargin[0];
     if (big && Math.abs((big.homeScore ?? 0) - (big.awayScore ?? 0)) >= 2) {
-      const winnerCode = (big.homeScore ?? 0) > (big.awayScore ?? 0) ? big.homeCode : big.awayCode;
+      // Orient the scoreline to the winner so the named team's goals come
+      // first — otherwise an away win reads back-to-front ("Austria 1–3").
+      const homeWon = (big.homeScore ?? 0) > (big.awayScore ?? 0);
+      const winnerCode = homeWon ? big.homeCode : big.awayCode;
+      const loserCode = homeWon ? big.awayCode : big.homeCode;
+      const winnerGoals = homeWon ? big.homeScore : big.awayScore;
+      const loserGoals = homeWon ? big.awayScore : big.homeScore;
       const w = teamsByCode[winnerCode];
+      const l = teamsByCode[loserCode];
       const owner = ownerName(winnerCode);
       headlines.push({
         icon: "🔥",
-        text: `${w?.name ?? winnerCode} ran riot ${big.homeScore}–${big.awayScore}${
-          owner ? ` — big points for ${owner}` : ""
-        }.`,
+        text: `${w?.name ?? winnerCode} ran riot ${winnerGoals}–${loserGoals} v ${
+          l?.name ?? loserCode
+        }${owner ? ` — big points for ${owner}` : ""}.`,
       });
     }
 

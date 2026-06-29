@@ -4,7 +4,16 @@ import { drawSeededPots, describeSplit } from "../src/lib/allocation.ts";
 import { buildStandings, DEFAULT_SCORING, managersOfRound, scoreMatchDay } from "../src/lib/scoring.ts";
 import { isCorrect, resolveBonusAnswer, scoreBonus } from "../src/lib/challenges.ts";
 import { mergeFixtures } from "../src/lib/api.ts";
-import { TEAMS } from "../src/data/teams.ts";
+import {
+  allGroupsComplete,
+  assignThirdsToSlots,
+  bestThirdGroups,
+  buildKnockoutFixtures,
+  computeGroupStandings,
+} from "../src/lib/bracket.ts";
+import { buildDailyDigest } from "../src/lib/headlines.ts";
+import { buildScheduleFixtures, WC2026_TEAMS } from "../src/data/worldcup2026.ts";
+import { TEAMS, TEAMS_BY_CODE } from "../src/data/teams.ts";
 import type {
   BonusChallenge,
   Entrant,
@@ -175,6 +184,65 @@ check("merge: same match isn't duplicated", mergedFx.length === 1);
 check("merge: score oriented to existing home/away", mergedFx[0]!.homeScore === 2 && mergedFx[0]!.awayScore === 1);
 const deduped = mergeFixtures(sched, [...sched, ...apiRows]); // base + (dup + api)
 check("merge: collapses pre-existing duplicate", deduped.length === 1);
+
+// ---- knockout bracket engine ----
+// A fully-played group stage where the stronger (lower pot) team always wins,
+// so every group settles to a clean 1st(pot1) / 2nd(pot2) / 3rd(pot3) / 4th.
+const potByCode = new Map(WC2026_TEAMS.map((t) => [t.code, t.pot]));
+const goalsFor = (code: string) => 4 - (potByCode.get(code) ?? 4); // pot1→3 … pot4→0
+const groupFx: Fixture[] = buildScheduleFixtures().map((f) => ({
+  ...f,
+  homeScore: goalsFor(f.homeCode),
+  awayScore: goalsFor(f.awayCode),
+  status: "finished" as const,
+}));
+
+check("bracket: a partial group stage is not complete", !allGroupsComplete(groupFx.slice(0, 10)));
+check("bracket: full group stage is complete", allGroupsComplete(groupFx));
+
+const standings = computeGroupStandings(groupFx);
+check("bracket: 12 group tables", standings.size === 12);
+const groupA = standings.get("A")!;
+check("bracket: group sorted, 4 teams ranked 1–4", groupA.length === 4 && groupA[3]!.rank === 4);
+check("bracket: strongest (pot 1) tops the group", potByCode.get(groupA[0]!.code) === 1);
+
+const thirds = bestThirdGroups(standings);
+check("bracket: exactly 8 best third-placed groups", thirds.length === 8);
+const slotMap = assignThirdsToSlots(thirds);
+check("bracket: all 8 thirds matched to reserved R32 slots", slotMap.size === 8);
+const slotGroupsLegal = [...slotMap.values()].every((g) => thirds.includes(g));
+check("bracket: every assigned slot holds a qualifying third", slotGroupsLegal);
+
+const r32only = buildKnockoutFixtures(groupFx);
+check("bracket: R32 generated once groups complete (16 ties)", r32only.length === 16);
+check("bracket: all generated ties are R32 with concrete teams", r32only.every((f) => f.stage === "r32" && !!f.homeCode && !!f.awayCode));
+check("bracket: nothing generated mid-group-stage", buildKnockoutFixtures(groupFx.slice(0, 40)).length === 0);
+
+// Play the R32 (home wins every tie) → the R16 should now resolve.
+let withR32 = mergeFixtures(groupFx, r32only);
+withR32 = withR32.map((f) =>
+  f.stage === "r32" ? { ...f, homeScore: 1, awayScore: 0, status: "finished" as const, manual: true } : f
+);
+const advanced = buildKnockoutFixtures(withR32);
+const r16 = advanced.filter((f) => f.stage === "r16");
+check("bracket: R16 advances off entered R32 results (8 ties)", r16.length === 8);
+check("bracket: R16 home teams are all R32 home winners", r16.every((f) => r32only.some((r) => r.homeCode === f.homeCode)));
+check("bracket: re-running preserves entered scores (no dup R32)", mergeFixtures(withR32, advanced).filter((f) => f.stage === "r32").length === 16);
+
+// ---- headline scoreline orientation (away win) ----
+const hlFixtures: Fixture[] = [
+  { id: "h1", stage: "group", group: "J", kickoff: "2026-06-27T00:00:00", homeCode: "ALG", awayCode: "AUT", homeScore: 1, awayScore: 3, status: "finished" },
+];
+const digest = buildDailyDigest(
+  hlFixtures,
+  [{ entrantId: "e0", teamCodes: ["AUT"] }],
+  [{ id: "e0", name: "Vince" }],
+  TEAMS_BY_CODE,
+  DEFAULT_SCORING,
+  "2026-06-27"
+);
+const riot = digest.headlines.find((h) => h.icon === "🔥");
+check("headline: away win is oriented to the winner (Austria 3–1)", !!riot && riot.text.includes("Austria ran riot 3–1 v Algeria"));
 
 console.log(failed === 0 ? "\nALL PASS ✅" : `\n${failed} FAILED ❌`);
 process.exit(failed === 0 ? 0 : 1);

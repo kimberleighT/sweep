@@ -20,6 +20,14 @@ live mini-league. Pick the number of entrants, watch an animated
 4. **Results** — "Sync results" pulls fixtures/scores from TheSportsDB
    (free, no key needed). Every fixture also has **manual score entry**
    as a fallback, and you can add results by hand.
+   - **Knockouts build themselves.** Once every group's results are in,
+     hit **"Generate knockouts"** — it reads the group tables, works out
+     the 12 winners/runners-up + the 8 best third-placed teams, fills the
+     Round of 32, and (each time you press it after entering a round's
+     scores) advances the bracket through R16 → QF → SF → Final. No API
+     needed — the knockout pairings are computed from your results, since
+     the feed can't supply games that haven't been drawn yet. See
+     `src/lib/bracket.ts`.
 5. **Bonus** — run prediction rounds alongside the sweepstake (see below).
 
 ### Fun extras
@@ -77,7 +85,15 @@ node --experimental-strip-types scripts/verify.ts
   id + season; confirm `API.leagueId` / `API.season` against live 2026
   data. If a sync returns nothing, manual entry covers you.
 - Knockout penalty-shootout winners aren't represented by the score
-  alone — set the winner via a manual result if needed.
+  alone — a level knockout score leaves the winner undecided, so the
+  bracket won't advance past it. Enter the decisive (post-pens) scoreline,
+  or add the next-round tie by hand, to push through.
+- The best-eight-thirds → R32-slot assignment is solved as a constraint
+  matching against FIFA's reserved slots, not the official 495-row lookup
+  table; it always yields a legal bracket but may differ from FIFA's exact
+  tie-break in rare ambiguous cases. The 3rd-place play-off (match 103) is
+  deliberately not generated (it shares the `final` stage and would skew
+  the champion/finalist bonuses).
 
 ## Stack
 

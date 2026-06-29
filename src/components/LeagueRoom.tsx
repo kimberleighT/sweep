@@ -7,6 +7,7 @@ import { loadTeams } from "../lib/storage";
 import { buildStandings, mergePoints, scoreMatchDay } from "../lib/scoring";
 import { scoreBonus } from "../lib/challenges";
 import { fetchSeasonFixtures, mergeFixtures } from "../lib/api";
+import { allGroupsComplete, buildKnockoutFixtures } from "../lib/bracket";
 import {
   assignMatchday,
   createChallenge,
@@ -368,6 +369,29 @@ export function LeagueRoom({
                 className="rounded-lg border border-white/20 px-4 py-2 text-sm font-bold uppercase tracking-wide transition hover:bg-white/10 disabled:opacity-50"
               >
                 Sync live results
+              </button>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void act(async () => {
+                    if (!allGroupsComplete(fixtures)) {
+                      setMsg("Finish entering all group results first — then the bracket fills automatically.");
+                      return;
+                    }
+                    const before = fixtures.filter((f) => f.stage !== "group").length;
+                    const next = mergeFixtures(fixtures, buildKnockoutFixtures(fixtures));
+                    await setMatches(session.token, next);
+                    const after = next.filter((f) => f.stage !== "group").length;
+                    setMsg(
+                      after > before
+                        ? `Bracket advanced — ${after - before} new knockout fixture${after - before === 1 ? "" : "s"} added.`
+                        : "Bracket up to date — enter the latest round's scores to unlock the next."
+                    );
+                  })
+                }
+                className="rounded-lg border border-white/20 px-4 py-2 text-sm font-bold uppercase tracking-wide transition hover:bg-white/10 disabled:opacity-50"
+              >
+                Generate knockouts
               </button>
             </div>
             <Fixtures
