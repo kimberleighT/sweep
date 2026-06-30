@@ -81,6 +81,17 @@ export function MatchDay({
     () => [...new Set(fixtures.map((f) => f.kickoff.slice(0, 10)).filter(Boolean))].sort(),
     [fixtures]
   );
+  // Predictions are only meaningful for games that haven't kicked off, so the
+  // "Add Match Day" picker offers UPCOMING fixture dates (today onward) and
+  // defaults to the soonest — otherwise it defaulted to the tournament's very
+  // first day and handed everyone a long-finished group game. Falls back to all
+  // dates if the tournament is over.
+  const upcomingDates = useMemo(() => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const upcoming = fixtureDates.filter((d) => d >= today);
+    return upcoming.length > 0 ? upcoming : fixtureDates;
+  }, [fixtureDates]);
   const rounds = useMemo(
     () => [...predictRounds].sort((a, b) => a.gameDate.localeCompare(b.gameDate)),
     [predictRounds]
@@ -95,7 +106,7 @@ export function MatchDay({
         {isHost && !adding && (
           <button
             onClick={() => setAdding(true)}
-            disabled={fixtureDates.length === 0}
+            disabled={upcomingDates.length === 0}
             className="rounded-lg bg-gold px-3 py-1.5 text-sm font-black uppercase tracking-wide text-black transition hover:brightness-110 disabled:opacity-40"
           >
             + Add Match Day
@@ -105,7 +116,7 @@ export function MatchDay({
 
       {isHost && adding && (
         <NewMatchDay
-          dates={fixtureDates}
+          dates={upcomingDates}
           onCreate={(i) => {
             onCreate(i);
             setAdding(false);
