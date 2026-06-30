@@ -5,6 +5,7 @@ import {
   KNOCKOUT_SCHEDULE,
   type GroupLetter,
 } from "../data/worldcup2026.ts";
+import { officialThirdAllocation } from "../data/third-place-allocation.ts";
 
 /**
  * Knockout bracket engine.
@@ -183,6 +184,16 @@ export function assignThirdsToSlots(
   qualifying: GroupLetter[],
   slots: ThirdSlot[] = thirdPlaceSlots()
 ): Map<number, GroupLetter> {
+  // Once the full eight qualifying third-placed groups are known, use FIFA's
+  // OFFICIAL Annex C allocation (the published 495-combination table) rather
+  // than a home-grown matching — they can pick different (both-legal) pairings,
+  // and only the official one matches the real bracket. The bipartite fallback
+  // below still covers partial/early states (fewer than 8 thirds resolved).
+  if (qualifying.length === 8) {
+    const official = officialThirdAllocation(qualifying);
+    if (official) return official;
+  }
+
   const slotMatch = new Map<number, GroupLetter>();
   const orderedSlots = [...slots].sort(
     (a, b) => a.allowed.size - b.allowed.size || a.matchNo - b.matchNo
